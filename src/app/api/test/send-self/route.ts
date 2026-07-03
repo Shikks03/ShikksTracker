@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
-import { sendGmailMessage } from "@/lib/gmail";
+import { getGmailClient, getSenderAddress, sendGmailMessage } from "@/lib/gmail";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (authError) return authError;
 
   try {
+    const gmail = getGmailClient();
+    const selfAddress = await getSenderAddress(gmail);
     const result = await sendGmailMessage({
-      to: "me", // Gmail API resolves "me" to the authenticated user's address
+      to: selfAddress,
       subject: "Outreach tool test send",
       htmlBody: `
         <h2>Outreach tool test send</h2>
