@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Suppression from "@/models/Suppression";
-import { handleError, isDuplicateKey } from "@/lib/api";
+import { handleError } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +26,6 @@ export async function POST(request: NextRequest) {
     const suppression = await Suppression.create(body);
     return NextResponse.json(suppression, { status: 201 });
   } catch (err) {
-    if (isDuplicateKey(err)) {
-      return NextResponse.json(
-        { error: "Email already suppressed" },
-        { status: 409 }
-      );
-    }
     return handleError(err);
   }
 }
