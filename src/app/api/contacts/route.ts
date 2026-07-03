@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
+import { createContactChecked, CreateContactInput } from "@/lib/contacts";
 
 export const dynamic = "force-dynamic";
 
@@ -36,10 +37,25 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-    const body = await request.json() as Record<string, unknown>;
-    const contact = await Contact.create(body);
-    return NextResponse.json(contact, { status: 201 });
+    const body = (await request.json()) as CreateContactInput;
+    const result = await createContactChecked(body, "manual");
+
+    switch (result.outcome) {
+      case "invalid":
+        return NextResponse.json({ error: result.reason }, { status: 400 });
+      case "suppressed":
+        return NextResponse.json(
+          { error: "Email is suppressed", reason: result.reason },
+          { status: 422 }
+        );
+      case "duplicate":
+        return NextResponse.json(
+          { error: "Duplicate: resource already exists" },
+          { status: 409 }
+        );
+      case "inserted":
+        return NextResponse.json(result.contact, { status: 201 });
+    }
   } catch (err) {
     return handleError(err);
   }
