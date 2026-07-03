@@ -1,0 +1,76 @@
+import mongoose, { Document, Schema, Types } from "mongoose";
+
+export interface IEmailLogLink {
+  url: string;
+  trackingId: string;
+}
+
+export interface IEmailLog extends Document {
+  contactId: Types.ObjectId;
+  campaignId: Types.ObjectId;
+  /** 1=initial, 2=followup1, 3=followup2 */
+  stage: 1 | 2 | 3;
+  /** Review-gate field: draft → approved → sent */
+  status: "draft" | "approved" | "sent";
+  subject: string;
+  body: string;
+  gmailThreadId: string | null;
+  gmailMessageId: string | null;
+  sentAt: Date | null;
+  trackingPixelId: string | null;
+  openCount: number;
+  firstOpenedAt: Date | null;
+  links: IEmailLogLink[];
+  clickCount: number;
+  firstClickedAt: Date | null;
+  replied: boolean;
+  repliedAt: Date | null;
+}
+
+const LinkSchema = new Schema<IEmailLogLink>(
+  {
+    url: { type: String, required: true },
+    trackingId: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const EmailLogSchema = new Schema<IEmailLog>({
+  contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+  campaignId: { type: Schema.Types.ObjectId, ref: "Campaign", required: true },
+  stage: { type: Number, enum: [1, 2, 3], required: true },
+  status: {
+    type: String,
+    enum: ["draft", "approved", "sent"],
+    default: "draft",
+  },
+  subject: { type: String, required: true },
+  body: { type: String, required: true },
+  gmailThreadId: { type: String, default: null },
+  gmailMessageId: { type: String, default: null },
+  sentAt: { type: Date, default: null },
+  trackingPixelId: { type: String, default: null },
+  openCount: { type: Number, default: 0 },
+  firstOpenedAt: { type: Date, default: null },
+  links: { type: [LinkSchema], default: [] },
+  clickCount: { type: Number, default: 0 },
+  firstClickedAt: { type: Date, default: null },
+  replied: { type: Boolean, default: false },
+  repliedAt: { type: Date, default: null },
+});
+
+// Contact/Campaign list queries
+EmailLogSchema.index({ contactId: 1 });
+EmailLogSchema.index({ campaignId: 1 });
+// Click lookups
+EmailLogSchema.index({ "links.trackingId": 1 }, { sparse: true });
+// Queue queries (review gate)
+EmailLogSchema.index({ status: 1 });
+// Pixel lookups
+EmailLogSchema.index({ trackingPixelId: 1 }, { sparse: true });
+
+const EmailLog =
+  (mongoose.models.EmailLog as mongoose.Model<IEmailLog>) ||
+  mongoose.model<IEmailLog>("EmailLog", EmailLogSchema);
+
+export default EmailLog;
