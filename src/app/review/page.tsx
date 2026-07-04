@@ -667,8 +667,10 @@ export default function ReviewPage() {
             style={{
               width: 260,
               flexShrink: 0,
-              paddingLeft: 20,
+              padding: "14px 16px 20px",
               borderLeft: "1px solid #D8CFBB",
+              backgroundColor: "#F4F0E6",
+              borderRadius: "0 10px 10px 0",
             }}
           >
             <MonoLabel
