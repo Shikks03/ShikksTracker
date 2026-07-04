@@ -12,10 +12,10 @@
 import { randomUUID } from "crypto";
 
 // ---------------------------------------------------------------------------
-// Internal: HTML escaping (mirrors draft.ts — kept local to avoid circular dep)
+// HTML escaping (mirrors draft.ts — kept here to avoid circular dep)
 // ---------------------------------------------------------------------------
 
-function htmlEscape(text: string): string {
+export function htmlEscape(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

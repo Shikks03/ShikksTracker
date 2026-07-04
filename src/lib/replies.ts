@@ -15,6 +15,7 @@ import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
 import { getGmailClient, getSenderAddress, sendGmailMessage } from "@/lib/gmail";
 import { bumpEngagement, SCORE_REPLY } from "@/lib/scoring";
+import { htmlEscape } from "@/lib/tracking";
 import type { Types } from "mongoose";
 
 // ---------------------------------------------------------------------------
@@ -309,9 +310,11 @@ export async function checkReplies(): Promise<RepliesResult> {
 
     for (const item of takeoverQueue) {
       try {
-        const contactUrl = `${appBaseUrl}/contacts/${String(item.contactId)}`;
+        // businessName/contactEmail originate from CSV imports — escape before
+        // embedding in the alert HTML so a hostile source list can't inject markup.
+        const contactUrl = encodeURI(`${appBaseUrl}/contacts/${String(item.contactId)}`);
         const htmlBody = `
-<p><strong>${item.businessName}</strong> (${item.contactEmail}) replied to stage ${item.stage}.</p>
+<p><strong>${htmlEscape(item.businessName)}</strong> (${htmlEscape(item.contactEmail)}) replied to stage ${item.stage}.</p>
 <p><a href="${contactUrl}">Open contact</a></p>
 `.trim();
 
