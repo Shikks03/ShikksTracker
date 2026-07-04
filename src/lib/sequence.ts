@@ -178,10 +178,12 @@ async function generateDrafts(): Promise<DraftsResult> {
     nextSendAt: { $lte: now, $ne: null },
     currentStage: { $lt: 3 },
   })
-    .limit(DRAFTS_PER_RUN)
+    .sort({ nextSendAt: 1 })
     .lean();
 
   for (const contact of contacts) {
+    if (result.created >= DRAFTS_PER_RUN) break;
+
     try {
       const targetStage = (contact.currentStage + 1) as 1 | 2 | 3;
 
@@ -301,14 +303,16 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
       const contact = await Contact.findById(log.contactId).lean() as IContact | null;
 
       if (!contact || contact.status !== "active") {
-        result.skipped.push(`log ${String(log._id)}: contact not active or missing`);
+        await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+        result.skipped.push(`log ${String(log._id)}: contact not active — reverted to draft`);
         continue;
       }
 
       // Load campaign (needed for sequenceSpacingDays)
       const campaign = await Campaign.findById(log.campaignId).lean() as ICampaign | null;
       if (!campaign) {
-        result.skipped.push(`log ${String(log._id)}: campaign not found`);
+        await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+        result.skipped.push(`log ${String(log._id)}: campaign not found — reverted to draft`);
         continue;
       }
 
@@ -332,19 +336,17 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
           if (prevLog.gmailThreadId) threadId = prevLog.gmailThreadId;
           if (prevLog.rfcMessageId) inReplyTo = prevLog.rfcMessageId;
 
-          // Build References: dedupe + trim nulls
-          const refParts = [prevLog.rfcMessageId];
-          // For stage 3, also include stage-1's rfcMessageId if different
+          // Build References oldest-first (RFC 5322): stage-1 first, then prevLog
+          let stage1RfcMessageId: string | null | undefined;
           if (log.stage === 3) {
             const stage1Log = await EmailLog.findOne({
               contactId: contact._id,
               stage: 1,
               status: "sent",
             }).lean();
-            if (stage1Log?.rfcMessageId && stage1Log.rfcMessageId !== prevLog.rfcMessageId) {
-              refParts.push(stage1Log.rfcMessageId);
-            }
+            stage1RfcMessageId = stage1Log?.rfcMessageId;
           }
+          const refParts = [stage1RfcMessageId, prevLog.rfcMessageId];
           const uniqueRefs = [...new Set(refParts.filter(Boolean))];
           if (uniqueRefs.length) references = uniqueRefs.join(" ");
 
