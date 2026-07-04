@@ -1,34 +1,65 @@
 "use client";
 
-/**
- * Review queue — Phase 6
- *
- * Minimal Tailwind UI for the email review gate.
- * Real dashboard styling is Phase 13.
- */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
+import {
+  Button,
+  HotChip,
+  MonoLabel,
+  Panel,
+  SectionHeader,
+} from "@/components/ui";
+import { useNextSendCountdown } from "@/components/useNextSendCountdown";
 
-import { useCallback, useEffect, useState } from "react";
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const INK         = "#1A1712";
+const FAINT       = "#8E836C";
+const FAINT2      = "#9A8F76";
+const CLAY        = "#BC5228";
+const AMBER_BORDER = "#C68A1E";
+const AMBER_TEXT   = "#96712A";
+const FOREST       = "#1C4B3A";
+
+const HOT_THRESHOLD = 5;
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface EmailLogItem {
   _id: string;
   contactId: string;
+  campaignId?: string;
   stage: 1 | 2 | 3;
   status: "draft" | "approved" | "sent";
   subject: string;
   body: string;
 }
 
-interface ContactMap {
-  [id: string]: string; // id → businessName
+interface ContactDoc {
+  _id: string;
+  businessName: string;
+  contactName?: string;
+  contactEmail: string;
+  keyPoints?: string;
+  engagementScore: number;
+  campaignId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+interface Campaign {
+  _id: string;
+  name: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function ordinalStage(stage: 1 | 2 | 3): string {
+  if (stage === 1) return "1ST";
+  if (stage === 2) return "2ND";
+  return "3RD";
+}
 
 async function apiFetch<T>(
   url: string,
@@ -41,126 +72,111 @@ async function apiFetch<T>(
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { data: null, error: (body as { error?: string }).error ?? `HTTP ${res.status}` };
+      return {
+        data: null,
+        error: (body as { error?: string }).error ?? `HTTP ${res.status}`,
+      };
     }
     const data = (await res.json()) as T;
     return { data, error: null };
   } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : String(err) };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ReviewPage() {
-  const [drafts, setDrafts] = useState<EmailLogItem[]>([]);
-  const [approved, setApproved] = useState<EmailLogItem[]>([]);
-  const [contacts, setContacts] = useState<ContactMap>({});
+  const countdown = useNextSendCountdown();
+
+  const [drafts,      setDrafts]      = useState<EmailLogItem[]>([]);
+  const [approved,    setApproved]    = useState<EmailLogItem[]>([]);
+  const [contactMap,  setContactMap]  = useState<Record<string, ContactDoc>>({});
+  const [campaignMap, setCampaignMap] = useState<Record<string, Campaign>>({});
   const [globalError, setGlobalError] = useState<string | null>(null);
 
-  // Per-draft editing state
-  const [edits, setEdits] = useState<Record<string, { subject: string; body: string }>>({});
+  // Current draft index
+  const [currentIdx, setCurrentIdx] = useState(0);
 
-  // ---------------------------------------------------------------------------
-  // Data loading
-  // ---------------------------------------------------------------------------
+  // Edit mode
+  const [editMode,    setEditMode]    = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody,    setEditBody]    = useState("");
 
-  const loadContacts = useCallback(async () => {
-    const { data, error } = await apiFetch<{ _id: string; businessName: string }[]>(
-      "/api/contacts"
-    );
-    if (error) {
-      setGlobalError(`Failed to load contacts: ${error}`);
-      return;
-    }
-    const map: ContactMap = {};
-    for (const c of data ?? []) {
-      map[c._id] = c.businessName;
-    }
-    setContacts(map);
-  }, []);
+  // ── Data loading ─────────────────────────────────────────────────────────────
 
-  const loadLogs = useCallback(async () => {
-    const [draftRes, approvedRes] = await Promise.all([
+  const loadAll = useCallback(async () => {
+    setGlobalError(null);
+
+    const [draftRes, approvedRes, contactsRes, campaignsRes] = await Promise.all([
       apiFetch<EmailLogItem[]>("/api/email-logs?status=draft"),
       apiFetch<EmailLogItem[]>("/api/email-logs?status=approved"),
+      apiFetch<ContactDoc[]>("/api/contacts"),
+      apiFetch<Campaign[]>("/api/campaigns"),
     ]);
 
-    if (draftRes.error) {
-      setGlobalError(`Failed to load drafts: ${draftRes.error}`);
-    } else {
-      const newDrafts = draftRes.data ?? [];
-      setDrafts(newDrafts);
-      // Seed edit state for new drafts
-      setEdits((prev) => {
-        const next = { ...prev };
-        for (const d of newDrafts) {
-          if (!next[d._id]) {
-            next[d._id] = { subject: d.subject, body: d.body };
-          }
-        }
-        return next;
-      });
-    }
+    if (draftRes.error)     setGlobalError(`Failed to load drafts: ${draftRes.error}`);
+    if (approvedRes.error)  setGlobalError(`Failed to load approved: ${approvedRes.error}`);
+    if (contactsRes.error)  setGlobalError(`Failed to load contacts: ${contactsRes.error}`);
+    if (campaignsRes.error) setGlobalError(`Failed to load campaigns: ${campaignsRes.error}`);
 
-    if (approvedRes.error) {
-      setGlobalError(`Failed to load approved: ${approvedRes.error}`);
-    } else {
-      setApproved(approvedRes.data ?? []);
-    }
+    setDrafts(draftRes.data ?? []);
+    setApproved(approvedRes.data ?? []);
+
+    const cMap: Record<string, ContactDoc> = {};
+    for (const c of contactsRes.data ?? []) cMap[c._id] = c;
+    setContactMap(cMap);
+
+    const campMap: Record<string, Campaign> = {};
+    for (const c of campaignsRes.data ?? []) campMap[c._id] = c;
+    setCampaignMap(campMap);
   }, []);
 
-  const refresh = useCallback(async () => {
-    setGlobalError(null);
-    await loadLogs();
-  }, [loadLogs]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Clamp currentIdx when drafts list shrinks
   useEffect(() => {
-    loadContacts();
-    loadLogs();
-  }, [loadContacts, loadLogs]);
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
-  async function handleSave(id: string) {
-    const edit = edits[id];
-    if (!edit) return;
-    const { error } = await apiFetch(`/api/email-logs/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ subject: edit.subject, body: edit.body }),
-    });
-    if (error) {
-      setGlobalError(`Save failed: ${error}`);
-    } else {
-      await refresh();
+    if (drafts.length > 0 && currentIdx >= drafts.length) {
+      setCurrentIdx(drafts.length - 1);
     }
-  }
+  }, [drafts.length, currentIdx]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────────
 
   async function handleApprove(id: string) {
     const { error } = await apiFetch(`/api/email-logs/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status: "approved" }),
     });
-    if (error) {
-      setGlobalError(`Approve failed: ${error}`);
-    } else {
-      await refresh();
-    }
+    if (error) { setGlobalError(`Approve failed: ${error}`); return; }
+    setEditMode(false);
+    // Advance index (clamp handled by effect after loadAll updates drafts)
+    setCurrentIdx((idx) => Math.max(0, Math.min(idx, drafts.length - 2)));
+    await loadAll();
+  }
+
+  async function handleSaveEdit(id: string) {
+    const { error } = await apiFetch(`/api/email-logs/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ subject: editSubject, body: editBody }),
+    });
+    if (error) { setGlobalError(`Save failed: ${error}`); return; }
+    setEditMode(false);
+    await loadAll();
   }
 
   async function handleDiscard(id: string) {
+    if (!window.confirm("Discard this draft?")) return;
     const { error } = await apiFetch(`/api/email-logs/${id}`, {
       method: "DELETE",
     });
-    if (error) {
-      setGlobalError(`Discard failed: ${error}`);
-    } else {
-      await refresh();
-    }
+    if (error) { setGlobalError(`Discard failed: ${error}`); return; }
+    setEditMode(false);
+    setCurrentIdx((idx) => Math.max(0, Math.min(idx, drafts.length - 2)));
+    await loadAll();
   }
 
   async function handleUnapprove(id: string) {
@@ -168,147 +184,685 @@ export default function ReviewPage() {
       method: "PATCH",
       body: JSON.stringify({ status: "draft" }),
     });
-    if (error) {
-      setGlobalError(`Unapprove failed: ${error}`);
-    } else {
-      await refresh();
-    }
+    if (error) { setGlobalError(`Unapprove failed: ${error}`); return; }
+    await loadAll();
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  async function handleApproveAllSafe() {
+    const safe = drafts.filter(
+      (d) => (contactMap[d.contactId]?.engagementScore ?? 0) < HOT_THRESHOLD
+    );
+    for (const d of safe) {
+      await apiFetch(`/api/email-logs/${d._id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "approved" }),
+      });
+    }
+    setCurrentIdx(0);
+    setEditMode(false);
+    await loadAll();
+  }
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+  // Refs so the stable event listener always sees current state
+  const draftsRef    = useRef(drafts);
+  const currentIdxRef = useRef(currentIdx);
+  const editModeRef  = useRef(editMode);
+
+  draftsRef.current    = drafts;
+  currentIdxRef.current = currentIdx;
+  editModeRef.current  = editMode;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (editModeRef.current) return;
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      const ds  = draftsRef.current;
+      const idx = currentIdxRef.current;
+      const cur = ds[idx];
+      if (!cur) return;
+
+      if (e.key === "a" || e.key === "A") {
+        e.preventDefault();
+        apiFetch(`/api/email-logs/${cur._id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "approved" }),
+        }).then(({ error }) => {
+          if (error) setGlobalError(`Approve failed: ${error}`);
+          else {
+            setCurrentIdx(Math.max(0, Math.min(idx, ds.length - 2)));
+            setEditMode(false);
+            loadAll();
+          }
+        });
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        setEditSubject(cur.subject);
+        setEditBody(cur.body);
+        setEditMode(true);
+      } else if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        if (ds.length > 0) setCurrentIdx((ds.length + idx + 1) % ds.length);
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [loadAll]);
+
+  // ── Derived values ────────────────────────────────────────────────────────────
+
+  const currentDraft   = drafts[currentIdx] ?? null;
+  const currentContact = currentDraft ? (contactMap[currentDraft.contactId] ?? null) : null;
+
+  const campaignName = (() => {
+    if (!currentDraft) return "";
+    const campId = currentDraft.campaignId ?? currentContact?.campaignId ?? "";
+    return campaignMap[campId]?.name ?? "";
+  })();
+
+  const isHot = (currentContact?.engagementScore ?? 0) >= HOT_THRESHOLD;
+
+  // Up to 4 drafts after current
+  const upNextDrafts = drafts.slice(currentIdx + 1, currentIdx + 5);
+
+  const safeDraftCount = drafts.filter(
+    (d) => (contactMap[d.contactId]?.engagementScore ?? 0) < HOT_THRESHOLD
+  ).length;
+
+  const upNextCount = Math.max(0, drafts.length - 1 - currentIdx);
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="max-w-4xl mx-auto p-6 font-sans">
-      <h1 className="text-2xl font-bold mb-6">Email Review Queue</h1>
+    <div style={{ padding: "24px 30px 40px", minHeight: "100%" }}>
 
+      {/* ── 1. HEADER ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
+        {/* Left: kicker + H1 */}
+        <div>
+          <MonoLabel
+            style={{
+              fontSize: 10,
+              letterSpacing: "0.14em",
+              color: FAINT,
+              display: "block",
+              marginBottom: 8,
+            }}
+          >
+            {drafts.length > 0
+              ? `DRAFT ${currentIdx + 1} / ${drafts.length} · SENDS IN ${countdown}`
+              : `SENDS IN ${countdown}`}
+          </MonoLabel>
+          <h1
+            style={{
+              fontFamily: serif,
+              fontSize: 34,
+              fontWeight: 400,
+              color: INK,
+              letterSpacing: "-0.01em",
+              lineHeight: 1.1,
+              margin: 0,
+            }}
+          >
+            Review Queue
+          </h1>
+        </div>
+
+        {/* Right: segmented progress bar */}
+        {drafts.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              width: 160,
+              marginTop: 14,
+              flexShrink: 0,
+              alignItems: "center",
+            }}
+          >
+            {drafts.map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: i <= currentIdx ? FOREST : "#D8CFBB",
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Global error ── */}
       {globalError && (
-        <p className="text-red-600 bg-red-50 border border-red-200 rounded p-3 mb-6">
-          {globalError}
-        </p>
+        <Panel style={{ padding: "12px 16px", marginTop: 16 }}>
+          <MonoLabel style={{ color: CLAY, textTransform: "uppercase" }}>
+            {globalError}
+          </MonoLabel>
+        </Panel>
       )}
 
-      {/* ---- Drafts ---- */}
-      <section className="mb-10">
-        <h2 className="text-xl font-semibold mb-4">
-          Drafts ({drafts.length})
-        </h2>
-
-        {drafts.length === 0 && (
-          <p className="text-gray-500">No drafts pending review.</p>
-        )}
-
-        <div className="space-y-6">
-          {drafts.map((log) => {
-            const edit = edits[log._id] ?? { subject: log.subject, body: log.body };
-            const businessName = contacts[log.contactId] ?? log.contactId;
-
-            return (
-              <div
-                key={log._id}
-                className="border border-gray-200 rounded-lg p-5 bg-white shadow-sm"
-              >
-                <div className="mb-2 text-sm text-gray-500">
-                  <span className="font-medium text-gray-800">{businessName}</span>
-                  {" — "}Stage {log.stage}
-                </div>
-
-                <div className="mb-3">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Subject
-                  </label>
-                  <input
-                    type="text"
-                    value={edit.subject}
-                    onChange={(e) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [log._id]: { ...prev[log._id], subject: e.target.value },
-                      }))
-                    }
-                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
-                </div>
-
-                <div className="mb-4">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Body
-                  </label>
-                  <textarea
-                    value={edit.body}
-                    onChange={(e) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [log._id]: { ...prev[log._id], body: e.target.value },
-                      }))
-                    }
-                    rows={8}
-                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y"
-                  />
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleSave(log._id)}
-                    className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-800 rounded border border-gray-300 transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => handleApprove(log._id)}
-                    className="px-4 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => handleDiscard(log._id)}
-                    className="px-4 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                  >
-                    Discard
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+      {/* ── 2. BODY ── */}
+      {drafts.length === 0 ? (
+        /* Empty state */
+        <div style={{ textAlign: "center", padding: "80px 0" }}>
+          <MonoLabel
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.14em",
+              color: FAINT,
+              display: "block",
+            }}
+          >
+            NO DRAFTS PENDING
+          </MonoLabel>
+          <MonoLabel
+            style={{
+              fontSize: 9.5,
+              color: FAINT2,
+              display: "block",
+              marginTop: 8,
+            }}
+          >
+            THE SEQUENCE ENGINE GENERATES DRAFTS ON ITS NEXT RUN
+          </MonoLabel>
         </div>
-      </section>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            gap: 24,
+            marginTop: 20,
+            alignItems: "flex-start",
+          }}
+        >
 
-      {/* ---- Approved (queued for send) ---- */}
-      <section>
-        <h2 className="text-xl font-semibold mb-4">
-          Approved — queued for send ({approved.length})
-        </h2>
+          {/* ── CENTER FOCUS CARD ── */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ maxWidth: 620, margin: "0 auto" }}>
 
-        {approved.length === 0 && (
-          <p className="text-gray-500">No emails queued for sending.</p>
-        )}
-
-        <div className="space-y-4">
-          {approved.map((log) => {
-            const businessName = contacts[log.contactId] ?? log.contactId;
-            return (
-              <div
-                key={log._id}
-                className="border border-green-200 rounded-lg p-4 bg-green-50 flex items-start justify-between gap-4"
+              <Panel
+                style={{
+                  padding: 0,
+                  overflow: "hidden",
+                  boxShadow: "0 8px 26px -16px rgba(40,30,10,.3)",
+                }}
               >
-                <div>
-                  <div className="text-sm font-medium text-gray-800">
-                    {businessName} — Stage {log.stage}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-0.5">{log.subject}</div>
-                </div>
-                <button
-                  onClick={() => handleUnapprove(log._id)}
-                  className="shrink-0 px-3 py-1.5 text-sm bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 transition-colors"
+                {/* Card header */}
+                <div
+                  style={{
+                    padding: "16px 20px",
+                    borderBottom: "1px solid #E4DBC8",
+                  }}
                 >
-                  Unapprove
-                </button>
-              </div>
-            );
-          })}
+                  {/* Row 1: meta + chip(s) */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        color: FAINT2,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {(currentContact?.businessName ?? "—").toUpperCase()}
+                      {" · "}
+                      {ordinalStage(currentDraft.stage)} TOUCH
+                      {campaignName ? ` · ${campaignName.toUpperCase()}` : ""}
+                    </span>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isHot && <HotChip />}
+                      <span
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 9.5,
+                          border: "1px solid #C9BEA6",
+                          color: FAINT,
+                          borderRadius: 4,
+                          padding: "1px 6px",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                        }}
+                      >
+                        DRAFT
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Subject */}
+                  {editMode ? (
+                    <input
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 27,
+                        fontWeight: 400,
+                        color: INK,
+                        letterSpacing: "-0.01em",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid #C9BEA6",
+                        outline: "none",
+                        width: "100%",
+                        marginTop: 8,
+                        padding: "2px 0",
+                        lineHeight: 1.2,
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 27,
+                        fontWeight: 400,
+                        color: INK,
+                        letterSpacing: "-0.01em",
+                        marginTop: 8,
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {currentDraft.subject}
+                    </div>
+                  )}
+
+                  {/* Row 3: TO */}
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10,
+                      color: FAINT2,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      marginTop: 6,
+                    }}
+                  >
+                    TO — {currentContact?.contactEmail ?? "—"}
+                  </div>
+                </div>
+
+                {/* Card body */}
+                <div style={{ padding: "20px 20px 0" }}>
+                  {editMode ? (
+                    <textarea
+                      value={editBody}
+                      onChange={(e) => setEditBody(e.target.value)}
+                      style={{
+                        fontFamily: grotesk,
+                        fontSize: 14.5,
+                        lineHeight: 1.75,
+                        color: "#2A251C",
+                        background: "transparent",
+                        border: "1px solid #C9BEA6",
+                        borderRadius: 6,
+                        outline: "none",
+                        width: "100%",
+                        minHeight: 260,
+                        padding: "10px 12px",
+                        resize: "vertical",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        fontFamily: grotesk,
+                        fontSize: 14.5,
+                        lineHeight: 1.75,
+                        color: "#2A251C",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {currentDraft.body}
+                    </div>
+                  )}
+                </div>
+
+                {/* Key points strip */}
+                {currentContact?.keyPoints && (
+                  <div
+                    style={{
+                      margin: "16px 20px 18px",
+                      padding: "10px 14px",
+                      borderLeft: `2px solid ${AMBER_BORDER}`,
+                      backgroundColor: "#F6F1E2",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        color: AMBER_TEXT,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      KEY POINTS →{" "}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10.5,
+                        color: "#7A6E52",
+                      }}
+                    >
+                      {currentContact.keyPoints}
+                    </span>
+                  </div>
+                )}
+
+                {/* Spacer when no key points so footer isn't glued to body */}
+                {!currentContact?.keyPoints && (
+                  <div style={{ height: 18 }} />
+                )}
+
+                {/* Card footer */}
+                <div
+                  style={{
+                    padding: "14px 20px",
+                    borderTop: "1px solid #E4DBC8",
+                    backgroundColor: "#F1EBDD",
+                    display: "flex",
+                    gap: 10,
+                  }}
+                >
+                  {editMode ? (
+                    <>
+                      <Button
+                        variant="primary"
+                        style={{ flex: 1 }}
+                        onClick={() => handleSaveEdit(currentDraft._id)}
+                      >
+                        Save changes
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setEditMode(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="primary"
+                        style={{ flex: 1 }}
+                        onClick={() => handleApprove(currentDraft._id)}
+                      >
+                        <Check size={14} />
+                        Approve
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditSubject(currentDraft.subject);
+                          setEditBody(currentDraft.body);
+                          setEditMode(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="danger-outline"
+                        onClick={() => handleDiscard(currentDraft._id)}
+                      >
+                        Discard
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </Panel>
+
+              {/* Keyboard hint */}
+              {!editMode && (
+                <div style={{ textAlign: "center", marginTop: 12 }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 9.5,
+                      color: FAINT,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    [A] APPROVE · [E] EDIT · [J] NEXT DRAFT
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── UP NEXT RAIL ── */}
+          <div
+            style={{
+              width: 260,
+              flexShrink: 0,
+              paddingLeft: 20,
+              borderLeft: "1px solid #D8CFBB",
+            }}
+          >
+            <MonoLabel
+              style={{
+                fontSize: 10,
+                letterSpacing: "0.14em",
+                color: FAINT,
+              }}
+            >
+              UP NEXT · {String(upNextCount).padStart(2, "0")}
+            </MonoLabel>
+
+            {/* Mini cards */}
+            {upNextDrafts.map((d, i) => {
+              const contact  = contactMap[d.contactId] ?? null;
+              const hot      = (contact?.engagementScore ?? 0) >= HOT_THRESHOLD;
+              const preview  = contact?.keyPoints
+                ? contact.keyPoints.toUpperCase()
+                : d.subject.toUpperCase();
+              const actualIdx = currentIdx + 1 + i;
+
+              return (
+                <Panel
+                  key={d._id}
+                  style={{ padding: "10px 12px", marginTop: 10, cursor: "pointer" }}
+                  onClick={() => {
+                    setCurrentIdx(actualIdx);
+                    setEditMode(false);
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: grotesk,
+                          fontWeight: 600,
+                          fontSize: 13,
+                          color: INK,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {contact?.businessName ?? "—"}
+                      </span>
+                      {hot && <HotChip />}
+                    </div>
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9,
+                        border: "1px solid #C9BEA6",
+                        color: FAINT2,
+                        borderRadius: 3,
+                        padding: "1px 4px",
+                        textTransform: "uppercase",
+                        flexShrink: 0,
+                        marginLeft: 6,
+                      }}
+                    >
+                      {ordinalStage(d.stage)}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 9,
+                      color: FAINT2,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      marginTop: 4,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {preview}
+                  </div>
+                </Panel>
+              );
+            })}
+
+            {/* Approve all safe drafts */}
+            <div style={{ marginTop: 14 }}>
+              <Button
+                variant="outline"
+                style={{ width: "100%" }}
+                disabled={safeDraftCount === 0}
+                onClick={handleApproveAllSafe}
+              >
+                Approve all safe drafts
+              </Button>
+            </div>
+          </div>
+
         </div>
-      </section>
-    </main>
+      )}
+
+      {/* ── 3. APPROVED · QUEUED STRIP ── */}
+      {approved.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <SectionHeader
+            title="APPROVED · QUEUED FOR SEND"
+            count={approved.length}
+          />
+          <Panel style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
+            {approved.map((log, idx) => {
+              const contact = contactMap[log.contactId] ?? null;
+              return (
+                <div key={log._id}>
+                  {idx > 0 && (
+                    <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />
+                  )}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 16px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10,
+                        color: "#5A5344",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        marginRight: 16,
+                      }}
+                    >
+                      {(contact?.businessName ?? "—").toUpperCase()}
+                      {" · "}
+                      {ordinalStage(log.stage)} TOUCH
+                      {" · "}
+                      <span style={{ color: FAINT2 }}>{log.subject}</span>
+                    </span>
+                    <UnapproveButton onUnapprove={() => handleUnapprove(log._id)} />
+                  </div>
+                </div>
+              );
+            })}
+          </Panel>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function UnapproveButton({ onUnapprove }: { onUnapprove: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onUnapprove}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        fontFamily: mono,
+        fontSize: 9.5,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: FAINT,
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        padding: 0,
+        flexShrink: 0,
+        textDecoration: hovered ? "underline" : "none",
+      }}
+    >
+      Unapprove
+    </button>
   );
 }
