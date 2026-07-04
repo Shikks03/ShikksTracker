@@ -31,6 +31,7 @@ Single-user, self-hosted cold-email outreach tool for Philippine small businesse
 - **Campaign** — `name`, `offerSummary` (feeds AI prompt), `toneNotes`, `sequenceSpacingDays: [0, 5, 9]`, `createdAt`
 - **EmailLog** — `contactId`, `campaignId`, `stage: 1–3`, `subject`, `body`, `gmailThreadId`, `gmailMessageId`, `sentAt`, `trackingPixelId`, `openCount`/`firstOpenedAt`, `links: [{ url, trackingId }]`, `clickCount`/`firstClickedAt`, `replied`/`repliedAt`
   - **Amendment for the review gate:** add `status: "draft" | "approved" | "sent"`. `sentAt`, Gmail IDs, and tracking fields are populated only at send time.
+  - **Amendment (phase 6):** also has `rfcMessageId` — the RFC-2822 `Message-ID` header fetched after send (NOT the Gmail API id); required for `In-Reply-To`/`References` threading of follow-ups.
 - **Suppression** — `email` (indexed, lowercase-normalized), `reason: "unsubscribed" | "bounced" | "manual"`, `addedAt`
 
 ## Review Gate (amendment to SPEC.md §5–6)
@@ -70,6 +71,10 @@ CRON_SECRET=             # protects the sequence-engine endpoint
 NTFY_TOPIC_URL=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
+# Optional tuning (defaults): ANTHROPIC_MODEL=claude-sonnet-4-6, DAILY_SEND_CAP=15,
+# SENDS_PER_RUN=3, DRAFTS_PER_RUN=10, SEND_DELAY_MIN_MS=30000, SEND_DELAY_MAX_MS=60000,
+# HOT_LEAD_THRESHOLD=5
 ```
 
 ## Non-Goals (v1)
