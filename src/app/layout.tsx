@@ -1,15 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import {
+  Instrument_Serif,
+  Familjen_Grotesk,
+  JetBrains_Mono,
+} from "next/font/google";
 import "./globals.css";
-import NavBar from "@/components/NavBar";
+import Sidebar from "@/components/Sidebar";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const instrumentSerif = Instrument_Serif({
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-instrument-serif",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const familjenGrotesk = Familjen_Grotesk({
+  variable: "--font-familjen",
+  subsets: ["latin"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains",
   subsets: ["latin"],
 });
 
@@ -26,11 +37,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${instrumentSerif.variable} ${familjenGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-gray-50">
-        <NavBar />
-        <div className="flex-1">{children}</div>
+      <body className="flex h-screen overflow-hidden bg-paper text-ink font-sans">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto bg-paper">
+          {children}
+        </main>
       </body>
     </html>
   );

@@ -11,6 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "googleapis": "^173.0.0",
+    "lucide-react": "^1.23.0",
     "mongoose": "^9.7.3",
     "next": "16.2.10",
     "papaparse": "^5.5.4",

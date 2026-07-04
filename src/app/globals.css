@@ -1,26 +1,56 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* ── Surface & Ink ───────────────────────────────────── */
+  --color-paper:          #ECE7D9;
+  --color-panel:          #F8F5EC;
+  --color-input-surface:  #FCFAF3;
+  --color-rail:           #161310;
+  --color-rail-cream:     #CFC6B4;
+  --color-rail-bright:    #F4EEDF;
+  --color-rail-dim:       #6E6653;
+  --color-rail-dim2:      #8B8371;
+  --color-rail-divider:   #2E2A22;
+  --color-ink:            #1A1712;
+  --color-muted:          #5A5344;
+  --color-faint:          #8E836C;
+  --color-faint2:         #9A8F76;
+  --color-faint3:         #A2957A;
+  --color-hairline:       #D3C9B4;
+  --color-hairline-row:   #E4DBC8;
+  --color-hairline-mid:   #D8CFBB;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* ── Accents ─────────────────────────────────────────── */
+  --color-forest:         #1C4B3A;
+  --color-green-deep:     #1C6E3A;
+  --color-clay:           #BC5228;
+  --color-amber:          #C68A1E;
+  --color-amber-text:     #96712A;
+  --color-amber-hot:      #8A6212;
+  --color-hot-border:     #D8B45E;
+  --color-hot-bg:         #F6ECCE;
+  --color-hot-chip-bg:    #F3E9CE;
+  --color-teal:           #1C6E6A;
+  --color-ochre:          #B8862B;
+  --color-slate:          #5B6472;
+  --color-stone:          #A99E86;
+  --color-brick:          #A23B28;
+  --color-footer-strip:   #F1EBDD;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* ── Fonts ───────────────────────────────────────────── */
+  --font-serif: var(--font-instrument-serif);
+  --font-sans:  var(--font-familjen);
+  --font-mono:  var(--font-jetbrains);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #ECE7D9;
+  color: #1A1712;
+  font-family: var(--font-familjen), system-ui, sans-serif;
+}
+
+/* Sidebar inactive nav item hover — needs CSS because inline style wins on base */
+.sidebar-nav-inactive:hover {
+  background-color: #242018 !important;
+  color: #E0D8C8 !important;
 }
