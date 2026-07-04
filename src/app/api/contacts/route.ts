@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
@@ -29,7 +30,14 @@ export async function GET(request: NextRequest) {
     const hot = searchParams.get("hot");
     const stats = searchParams.get("stats");
 
-    if (campaignId) filter.campaignId = campaignId;
+    if (campaignId) {
+      // Cast explicitly: aggregation $match (stats=true path) bypasses
+      // Mongoose's string→ObjectId casting, unlike find().
+      if (!mongoose.isValidObjectId(campaignId)) {
+        return NextResponse.json({ error: "Invalid campaignId" }, { status: 400 });
+      }
+      filter.campaignId = new mongoose.Types.ObjectId(campaignId);
+    }
     if (status) filter.status = status;
     if (pipelineStage) filter.pipelineStage = pipelineStage;
     if (leadSource) filter.leadSource = leadSource;
