@@ -68,6 +68,17 @@ function stripQuotedText(text: string): string {
   return result.join("\n");
 }
 
+/**
+ * Derives a single-line snippet from cleaned reply text:
+ * collapses all whitespace/newlines to single spaces, trims, truncates to
+ * 80 chars with a "…" suffix if longer. Returns null when the result is empty.
+ */
+function makeSnippet(text: string): string | null {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return collapsed.length > 80 ? collapsed.slice(0, 80) + "…" : collapsed;
+}
+
 const OPT_OUT_PATTERNS = [
   /\bstop\b/i,
   /\bunsubscribe\b/i,
@@ -238,10 +249,13 @@ export async function checkReplies(): Promise<RepliesResult> {
           { upsert: true }
         );
 
-        // 3. Mark last sent log as replied
+        // 3. Mark last sent log as replied, storing stripped body + snippet
+        const optOutClean = stripQuotedText(bodyText).trim();
         await EmailLog.findByIdAndUpdate(lastSentLog._id, {
           replied: true,
           repliedAt,
+          replyBody: optOutClean || null,
+          replySnippet: makeSnippet(optOutClean),
         });
 
         // 4. Delete pending draft/approved logs for this contact
@@ -261,10 +275,13 @@ export async function checkReplies(): Promise<RepliesResult> {
           nextSendAt: null,
         });
 
-        // 2. Mark last sent log as replied
+        // 2. Mark last sent log as replied, storing stripped body + snippet
+        const replyClean = stripQuotedText(bodyText).trim();
         await EmailLog.findByIdAndUpdate(lastSentLog._id, {
           replied: true,
           repliedAt,
+          replyBody: replyClean || null,
+          replySnippet: makeSnippet(replyClean),
         });
 
         // 3. Bump engagement score

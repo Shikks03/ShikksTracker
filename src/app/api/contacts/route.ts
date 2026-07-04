@@ -116,9 +116,63 @@ export async function GET(request: NextRequest) {
                 0,
               ],
             },
+            // Max repliedAt across logs where replied === true
+            repliedAt: {
+              $max: {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: "$logs",
+                      as: "l",
+                      cond: { $eq: ["$$l.replied", true] },
+                    },
+                  },
+                  as: "rl",
+                  in: "$$rl.repliedAt",
+                },
+              },
+            },
+            // replySnippet from the most-recent replied log (by repliedAt)
+            replySnippet: {
+              $let: {
+                vars: {
+                  topReplied: {
+                    $first: {
+                      $sortArray: {
+                        input: {
+                          $filter: {
+                            input: "$logs",
+                            as: "l",
+                            cond: { $eq: ["$$l.replied", true] },
+                          },
+                        },
+                        sortBy: { repliedAt: -1 },
+                      },
+                    },
+                  },
+                },
+                in: "$$topReplied.replySnippet",
+              },
+            },
+            // Highest-stage log (any status) — kept as temp field, unset below
+            lastLog: {
+              $first: {
+                $sortArray: {
+                  input: "$logs",
+                  sortBy: { stage: -1 },
+                },
+              },
+            },
           },
         },
-        { $unset: "logs" },
+        // Extract scalars from the temp lastLog document
+        {
+          $addFields: {
+            lastLogStage: "$lastLog.stage",
+            lastLogStatus: "$lastLog.status",
+          },
+        },
+        { $unset: ["logs", "lastLog"] },
       ];
 
       const contacts = await Contact.aggregate(pipeline);

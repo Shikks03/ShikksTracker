@@ -27,6 +27,10 @@ export interface IEmailLog extends Document {
   firstClickedAt: Date | null;
   replied: boolean;
   repliedAt: Date | null;
+  /** Full plain-text reply body with quoted text stripped. Populated by reply detection (src/lib/replies.ts). */
+  replyBody: string | null;
+  /** Single-line preview of replyBody, ≤80 chars. Populated by reply detection (src/lib/replies.ts). */
+  replySnippet: string | null;
 }
 
 const LinkSchema = new Schema<IEmailLogLink>(
@@ -60,6 +64,8 @@ const EmailLogSchema = new Schema<IEmailLog>({
   firstClickedAt: { type: Date, default: null },
   replied: { type: Boolean, default: false },
   repliedAt: { type: Date, default: null },
+  replyBody: { type: String, default: null },
+  replySnippet: { type: String, default: null },
 });
 
 // Contact/Campaign list queries
