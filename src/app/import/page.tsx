@@ -1,6 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Upload } from "lucide-react";
+import { Panel, Button, inputClass } from "@/components/ui";
+
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
+const INK     = "#1A1712";
+const FAINT   = "#8E836C";
+const FAINT2  = "#9A8F76";
+const CLAY    = "#BC5228";
+const FOREST  = "#1C4B3A";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Campaign {
   _id: string;
@@ -8,79 +22,143 @@ interface Campaign {
 }
 
 const LEAD_SOURCES = [
-  { value: "cold_email", label: "Cold Email" },
-  { value: "referral", label: "Referral" },
+  { value: "cold_email",       label: "Cold Email" },
+  { value: "referral",         label: "Referral" },
   { value: "event_connection", label: "Event Connection" },
-  { value: "other", label: "Other" },
+  { value: "other",            label: "Other" },
 ] as const;
 
+interface ImportApiResult {
+  inserted: number;
+  skipped: {
+    suppressed: Array<{ row: number; email: string; reason: string }>;
+    duplicates: Array<{ row: number; email: string }>;
+    invalid:    Array<{ row: number; reason: string }>;
+  };
+}
+
+interface LastImport {
+  fileName:   string;
+  totalRows:  number;
+  inserted:   number;
+  suppressed: number;
+  duplicates: number;
+  invalid:    number;
+  at:         string;
+}
+
+const LS_KEY = "lastImport";
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function ImportPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns,  setCampaigns]  = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
-  const [csvResult, setCsvResult] = useState<unknown>(null);
-  const [csvLoading, setCsvLoading] = useState(false);
-  const [manualResult, setManualResult] = useState<unknown>(null);
-  const [manualLoading, setManualLoading] = useState(false);
+  const [tab,        setTab]        = useState<"csv" | "manual">("csv");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploading,   setUploading]   = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [lastImport,  setLastImport]  = useState<LastImport | null>(null);
+
+  // Manual form
+  const [businessName,   setBusinessName]   = useState("");
+  const [contactEmail,   setContactEmail]   = useState("");
+  const [contactName,    setContactName]    = useState("");
+  const [keyPoints,      setKeyPoints]      = useState("");
+  const [leadSource,     setLeadSource]     = useState("cold_email");
+  const [manualLoading,  setManualLoading]  = useState(false);
+  const [manualSuccess,  setManualSuccess]  = useState(false);
+  const [manualError,    setManualError]    = useState<string | null>(null);
+
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Manual form state
-  const [businessName, setBusinessName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [keyPoints, setKeyPoints] = useState("");
-  const [leadSource, setLeadSource] = useState("cold_email");
-
+  // Load campaigns
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
-      // API errors return { error } — only accept an array
       .then((data: unknown) => {
         if (!Array.isArray(data)) return;
         const list = data as Campaign[];
         setCampaigns(list);
         if (list.length > 0) setCampaignId(list[0]._id);
       })
-      .catch((err) => console.error("Failed to load campaigns", err));
+      .catch(() => {});
   }, []);
 
-  async function handleCsvUpload(e: React.FormEvent) {
-    e.preventDefault();
-    const file = fileRef.current?.files?.[0];
-    if (!file) {
-      setCsvResult({ error: "No file selected" });
-      return;
-    }
+  // Hydrate lastImport from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LS_KEY);
+      if (stored) setLastImport(JSON.parse(stored) as LastImport);
+    } catch { /* ignore */ }
+  }, []);
+
+  async function uploadFile(file: File) {
     if (!campaignId) {
-      setCsvResult({ error: "No campaign selected" });
+      setUploadError("No campaign selected");
       return;
     }
-    setCsvLoading(true);
-    setCsvResult(null);
+    setUploading(true);
+    setUploadError(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("campaignId", campaignId);
-      const res = await fetch("/api/contacts/import", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      setCsvResult(data);
+      const res = await fetch("/api/contacts/import", { method: "POST", body: formData });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setUploadError(body.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as ImportApiResult;
+      const li: LastImport = {
+        fileName:   file.name,
+        totalRows:
+          data.inserted +
+          data.skipped.suppressed.length +
+          data.skipped.duplicates.length +
+          data.skipped.invalid.length,
+        inserted:   data.inserted,
+        suppressed: data.skipped.suppressed.length,
+        duplicates: data.skipped.duplicates.length,
+        invalid:    data.skipped.invalid.length,
+        at:         new Date().toISOString(),
+      };
+      localStorage.setItem(LS_KEY, JSON.stringify(li));
+      setLastImport(li);
     } catch (err) {
-      setCsvResult({ error: String(err) });
+      setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
-      setCsvLoading(false);
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) void uploadFile(file);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave() { setIsDragOver(false); }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void uploadFile(file);
   }
 
   async function handleManualAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!campaignId) {
-      setManualResult({ error: "No campaign selected" });
-      return;
-    }
+    if (!campaignId) { setManualError("No campaign selected"); return; }
     setManualLoading(true);
-    setManualResult(null);
+    setManualError(null);
+    setManualSuccess(false);
     try {
       const res = await fetch("/api/contacts", {
         method: "POST",
@@ -94,142 +172,386 @@ export default function ImportPage() {
           campaignId,
         }),
       });
-      const data = await res.json();
-      setManualResult(data);
-      if (res.ok) {
-        // Clear form on success
-        setBusinessName("");
-        setContactEmail("");
-        setContactName("");
-        setKeyPoints("");
-        setLeadSource("cold_email");
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setManualError(data.error ?? `HTTP ${res.status}`);
+      } else {
+        setManualSuccess(true);
+        setBusinessName(""); setContactEmail(""); setContactName("");
+        setKeyPoints(""); setLeadSource("cold_email");
       }
     } catch (err) {
-      setManualResult({ error: String(err) });
+      setManualError(err instanceof Error ? err.message : String(err));
     } finally {
       setManualLoading(false);
     }
   }
 
-  return (
-    <div className="p-6 max-w-2xl mx-auto space-y-8">
-      <h1 className="text-xl font-bold">Contact Import</h1>
+  const monoLabel: React.CSSProperties = {
+    fontFamily: mono,
+    fontSize: 9.5,
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    color: FAINT2,
+    display: "block",
+    marginBottom: 5,
+  };
 
-      {/* Campaign selector (shared by both forms) */}
-      <div className="space-y-1">
-        <label className="block font-medium">Campaign</label>
+  const STAT_TILES = [
+    { key: "inserted"   as const, label: "INSERTED",   bg: "#EAF2E7", border: "#C6D8C0", color: "#1C6E3A" },
+    { key: "suppressed" as const, label: "SUPPRESSED",  bg: "#F7E8E2", border: "#E0C4B8", color: "#A23B28" },
+    { key: "duplicates" as const, label: "DUPLICATES",  bg: "#F7EFD9", border: "#E2D3A8", color: "#96712A" },
+    { key: "invalid"    as const, label: "INVALID",     bg: "#EFEBE0", border: "#D8CFBB", color: "#7A7263" },
+  ] as const;
+
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto", padding: "32px 30px 60px" }}>
+
+      {/* H1 */}
+      <h1
+        style={{
+          fontFamily: serif,
+          fontSize: 34,
+          fontWeight: 400,
+          color: INK,
+          letterSpacing: "-0.01em",
+          textAlign: "center",
+          margin: 0,
+          lineHeight: 1.1,
+        }}
+      >
+        Import Contacts
+      </h1>
+      <div
+        style={{
+          fontFamily: mono,
+          fontSize: 9.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.14em",
+          color: FAINT,
+          textAlign: "center",
+          marginTop: 10,
+        }}
+      >
+        SUPPRESSED EMAILS ARE ALWAYS SKIPPED
+      </div>
+
+      {/* Campaign select */}
+      <div style={{ marginTop: 18 }}>
+        <label style={monoLabel}>CAMPAIGN</label>
         <select
-          className="border p-1"
+          className={inputClass}
           value={campaignId}
           onChange={(e) => setCampaignId(e.target.value)}
         >
-          {campaigns.length === 0 && (
-            <option value="">Loading campaigns…</option>
-          )}
+          {campaigns.length === 0 && <option value="">Loading campaigns…</option>}
           {campaigns.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.name}
-            </option>
+            <option key={c._id} value={c._id}>{c.name}</option>
           ))}
         </select>
       </div>
 
-      {/* ── CSV Upload ── */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">CSV Upload</h2>
-        <p className="text-sm text-gray-600">
-          Required columns: <code>businessName</code>, <code>contactEmail</code>,{" "}
-          <code>keyPoints</code>. Optional: <code>contactName</code>,{" "}
-          <code>leadSource</code> (cold_email | referral | event_connection | other).
-        </p>
-        <form onSubmit={handleCsvUpload} className="space-y-2">
-          <div>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" />
-          </div>
+      {/* Segmented toggle */}
+      <div
+        style={{
+          display: "flex",
+          backgroundColor: "#E4DDC9",
+          borderRadius: 8,
+          padding: 3,
+          marginTop: 14,
+        }}
+      >
+        {(["csv", "manual"] as const).map((t) => (
           <button
-            type="submit"
-            disabled={csvLoading}
-            className="border px-3 py-1"
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            style={{
+              flex: 1,
+              fontFamily: grotesk,
+              fontWeight: 600,
+              fontSize: 13,
+              padding: "8px",
+              borderRadius: 6,
+              border: tab === t ? "1px solid #D3C9B4" : "1px solid transparent",
+              backgroundColor: tab === t ? "#FCFAF3" : "transparent",
+              color: tab === t ? INK : "#8E836C",
+              cursor: "pointer",
+              transition: "all 0.1s",
+            }}
           >
-            {csvLoading ? "Uploading…" : "Upload CSV"}
+            {t === "csv" ? "Upload CSV" : "Add manually"}
           </button>
-        </form>
-        {csvResult !== null && (
-          <pre className="bg-gray-100 p-3 text-sm overflow-auto">
-            {JSON.stringify(csvResult, null, 2)}
-          </pre>
-        )}
-      </section>
+        ))}
+      </div>
 
-      {/* ── Manual Add ── */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Manual Add</h2>
-        <form onSubmit={handleManualAdd} className="space-y-2">
-          <div className="space-y-1">
-            <label className="block text-sm">Business Name *</label>
+      {/* CSV tab */}
+      {tab === "csv" && (
+        <div style={{ marginTop: 14 }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <div
+            onClick={() => { if (!uploading) fileRef.current?.click(); }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            style={{
+              backgroundColor: isDragOver ? "#F1E9D2" : "#F5EFDF",
+              border: `1.5px dashed ${isDragOver ? "#A99E86" : "#CBBF9F"}`,
+              borderRadius: 10,
+              padding: "36px 20px",
+              textAlign: "center",
+              cursor: uploading ? "default" : "pointer",
+              transition: "all 0.1s",
+            }}
+          >
+            {/* Upload icon tile */}
+            <div
+              style={{
+                display: "inline-flex",
+                width: 40,
+                height: 40,
+                backgroundColor: "#FCFAF3",
+                border: "1px solid #D3C9B4",
+                borderRadius: 8,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Upload size={16} color="#5A5344" />
+            </div>
+
+            {uploading ? (
+              <div style={{ marginTop: 12 }}>
+                <span
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 9.5,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: FAINT,
+                  }}
+                >
+                  UPLOADING…
+                </span>
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontFamily: grotesk,
+                    fontWeight: 600,
+                    fontSize: 14,
+                    color: INK,
+                    marginTop: 12,
+                  }}
+                >
+                  Drop your CSV here
+                </div>
+                <div
+                  style={{
+                    fontFamily: grotesk,
+                    fontSize: 13,
+                    color: "#5A5344",
+                    marginTop: 4,
+                  }}
+                >
+                  or{" "}
+                  <span style={{ color: FOREST, textDecoration: "underline" }}>
+                    browse files
+                  </span>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 9,
+                      color: FAINT2,
+                      letterSpacing: "0.06em",
+                      lineHeight: 1.8,
+                    }}
+                  >
+                    businessName · contactEmail · contactName
+                    <br />
+                    keyPoints · leadSource · campaignId
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          {uploadError && (
+            <div style={{ marginTop: 10, textAlign: "center" }}>
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 9.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: CLAY,
+                }}
+              >
+                {uploadError}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual tab */}
+      {tab === "manual" && (
+        <form
+          onSubmit={handleManualAdd}
+          style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          <div>
+            <label style={monoLabel}>BUSINESS NAME *</label>
             <input
-              className="border p-1 w-full"
+              className={inputClass}
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
               required
             />
           </div>
-          <div className="space-y-1">
-            <label className="block text-sm">Contact Email *</label>
+          <div>
+            <label style={monoLabel}>CONTACT EMAIL *</label>
             <input
               type="email"
-              className="border p-1 w-full"
+              className={inputClass}
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
               required
             />
           </div>
-          <div className="space-y-1">
-            <label className="block text-sm">Contact Name</label>
+          <div>
+            <label style={monoLabel}>CONTACT NAME</label>
             <input
-              className="border p-1 w-full"
+              className={inputClass}
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
             />
           </div>
-          <div className="space-y-1">
-            <label className="block text-sm">Key Points *</label>
+          <div>
+            <label style={monoLabel}>KEY POINTS *</label>
             <textarea
-              className="border p-1 w-full"
+              className={inputClass}
               rows={3}
               value={keyPoints}
               onChange={(e) => setKeyPoints(e.target.value)}
               required
             />
           </div>
-          <div className="space-y-1">
-            <label className="block text-sm">Lead Source</label>
+          <div>
+            <label style={monoLabel}>LEAD SOURCE</label>
             <select
-              className="border p-1"
+              className={inputClass}
               value={leadSource}
               onChange={(e) => setLeadSource(e.target.value)}
             >
               {LEAD_SOURCES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
+                <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
           </div>
-          <button
-            type="submit"
-            disabled={manualLoading}
-            className="border px-3 py-1"
-          >
-            {manualLoading ? "Adding…" : "Add Contact"}
-          </button>
+          {manualSuccess && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#1C6E3A",
+              }}
+            >
+              CONTACT ADDED
+            </span>
+          )}
+          {manualError && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: CLAY,
+              }}
+            >
+              {manualError}
+            </span>
+          )}
+          <Button type="submit" variant="primary" disabled={manualLoading} className="w-full">
+            {manualLoading ? "Adding…" : "Add contact"}
+          </Button>
         </form>
-        {manualResult !== null && (
-          <pre className="bg-gray-100 p-3 text-sm overflow-auto">
-            {JSON.stringify(manualResult, null, 2)}
-          </pre>
-        )}
-      </section>
+      )}
+
+      {/* Last import panel */}
+      {lastImport && (
+        <div style={{ marginTop: 20 }}>
+          <Panel style={{ padding: "14px 16px" }}>
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: FAINT,
+              }}
+            >
+              LAST IMPORT — {lastImport.fileName.toUpperCase()} · {lastImport.totalRows} ROWS
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: 10,
+                marginTop: 12,
+              }}
+            >
+              {STAT_TILES.map(({ key, label, bg, border, color }) => (
+                <div
+                  key={key}
+                  style={{
+                    backgroundColor: bg,
+                    border: `1px solid ${border}`,
+                    borderRadius: 8,
+                    padding: 12,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: serif,
+                      fontSize: 26,
+                      fontWeight: 400,
+                      color,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {lastImport[key]}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 8.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      color,
+                      marginTop: 6,
+                    }}
+                  >
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      )}
     </div>
   );
 }

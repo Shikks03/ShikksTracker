@@ -1,8 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Panel,
+  SectionHeader,
+  Button,
+  inputClass,
+  PIPELINE_META,
+} from "@/components/ui";
 
-// ---- Types ----
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
+const INK     = "#1A1712";
+const FAINT   = "#8E836C";
+const FAINT2  = "#9A8F76";
+const CLAY    = "#BC5228";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Campaign {
   _id: string;
@@ -38,31 +54,26 @@ const PIPELINE_STAGES = [
   "lost",
 ] as const;
 
-const PIPELINE_LABELS: Record<string, string> = {
-  not_started: "Not started",
-  contacted: "Contacted",
-  replied: "Replied",
-  call_booked: "Call booked",
-  proposal_sent: "Proposal sent",
-  won: "Won",
-  lost: "Lost",
-};
-
 const LEAD_SOURCE_LABELS: Record<string, string> = {
-  cold_email: "Cold email",
-  referral: "Referral",
-  event_connection: "Event connection",
-  other: "Other",
+  cold_email:       "Cold Email",
+  referral:         "Referral",
+  event_connection: "Event Connection",
+  other:            "Other",
 };
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: T | null; error: string | null }> {
+// ── API helper ────────────────────────────────────────────────────────────────
+
+async function apiFetch<T>(
+  url: string,
+  options?: RequestInit
+): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { data: null, error: body.error ?? `HTTP ${res.status}` };
     }
     return { data: (await res.json()) as T, error: null };
@@ -71,196 +82,184 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: 
   }
 }
 
-// ---- Sub-components ----
-
-function FunnelBar({ label, value, max }: { label: string; value: number; max: number }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <span className="w-20 text-gray-500 shrink-0">{label}</span>
-      <div className="flex-1 bg-gray-100 rounded h-2 overflow-hidden">
-        <div
-          className="bg-blue-500 h-2 rounded transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-8 text-right text-gray-700 font-medium shrink-0">{value}</span>
-    </div>
-  );
+function fmtCreated(dateStr: string): string {
+  return new Date(dateStr)
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    .toUpperCase();
 }
+
+// ── Campaign Card ─────────────────────────────────────────────────────────────
 
 function CampaignCard({ campaign }: { campaign: Campaign }) {
-  const [stats, setStats] = useState<CampaignStats | null>(null);
-  const [statsError, setStatsError] = useState<string | null>(null);
+  const [stats,       setStats]       = useState<CampaignStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError,  setStatsError]  = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<CampaignStats>(`/api/campaigns/${campaign._id}/stats`).then(({ data, error }) => {
-      if (error) setStatsError(error);
-      else setStats(data);
-    });
+    setStatsLoading(true);
+    apiFetch<CampaignStats>(`/api/campaigns/${campaign._id}/stats`).then(
+      ({ data, error }) => {
+        setStatsLoading(false);
+        if (error) setStatsError(error);
+        else setStats(data);
+      }
+    );
   }, [campaign._id]);
 
-  const maxFunnel = stats?.funnel.sent ?? 0;
+  const total = stats
+    ? Object.values(stats.pipeline).reduce((a, b) => a + b, 0)
+    : 0;
 
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-      <div>
-        <h3 className="text-lg font-semibold text-gray-900">{campaign.name}</h3>
-        <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{campaign.offerSummary}</p>
-        {campaign.toneNotes && (
-          <p className="text-xs text-gray-400 mt-1">Tone: {campaign.toneNotes}</p>
-        )}
-        <p className="text-xs text-gray-400 mt-1">
-          Spacing: {campaign.sequenceSpacingDays.join(" / ")} days
-        </p>
-      </div>
-
-      {statsError && (
-        <p className="text-xs text-red-500">Stats error: {statsError}</p>
-      )}
-
-      {stats && (
-        <>
-          {/* Funnel */}
-          <div>
-            <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Funnel</p>
-            <div className="space-y-1.5">
-              <FunnelBar label="Sent" value={stats.funnel.sent} max={maxFunnel} />
-              <FunnelBar label="Opened" value={stats.funnel.opened} max={maxFunnel} />
-              <FunnelBar label="Clicked" value={stats.funnel.clicked} max={maxFunnel} />
-              <FunnelBar label="Replied" value={stats.funnel.replied} max={maxFunnel} />
-            </div>
-          </div>
-
-          {/* Pipeline breakdown */}
-          <div>
-            <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Pipeline</p>
-            <div className="flex flex-wrap gap-2">
-              {PIPELINE_STAGES.map((s) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-2 py-0.5 text-xs text-gray-700"
-                >
-                  <span className="text-gray-400">{PIPELINE_LABELS[s]}</span>
-                  <span className="font-medium">{stats.pipeline[s] ?? 0}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+  const activeStages = PIPELINE_STAGES.filter(
+    (s) => (stats?.pipeline[s] ?? 0) > 0
   );
-}
-
-// ---- Create form ----
-
-function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [offerSummary, setOfferSummary] = useState("");
-  const [toneNotes, setToneNotes] = useState("");
-  const [day0, setDay0] = useState("0");
-  const [day1, setDay1] = useState("5");
-  const [day2, setDay2] = useState("9");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    const { error: err } = await apiFetch("/api/campaigns", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        offerSummary,
-        toneNotes,
-        sequenceSpacingDays: [
-          parseInt(day0, 10) || 0,
-          parseInt(day1, 10) || 5,
-          parseInt(day2, 10) || 9,
-        ],
-      }),
-    });
-    setLoading(false);
-    if (err) { setError(err); return; }
-    setName(""); setOfferSummary(""); setToneNotes("");
-    setDay0("0"); setDay1("5"); setDay2("9");
-    onCreated();
-  }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-      <h2 className="font-semibold text-gray-800">New campaign</h2>
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="space-y-1">
-        <label className="block text-xs font-medium text-gray-600">Name *</label>
-        <input
-          className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-      </div>
-      <div className="space-y-1">
-        <label className="block text-xs font-medium text-gray-600">Offer summary *</label>
-        <textarea
-          className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y"
-          rows={3}
-          value={offerSummary}
-          onChange={(e) => setOfferSummary(e.target.value)}
-          required
-        />
-      </div>
-      <div className="space-y-1">
-        <label className="block text-xs font-medium text-gray-600">Tone notes</label>
-        <input
-          className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={toneNotes}
-          onChange={(e) => setToneNotes(e.target.value)}
-        />
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          Sequence spacing (days from first send)
-        </label>
-        <div className="flex gap-2 items-center">
-          {[
-            { label: "Stage 1", val: day0, set: setDay0 },
-            { label: "Stage 2", val: day1, set: setDay1 },
-            { label: "Stage 3", val: day2, set: setDay2 },
-          ].map(({ label, val, set }) => (
-            <div key={label} className="space-y-0.5">
-              <label className="block text-xs text-gray-400">{label}</label>
-              <input
-                type="number"
-                className="w-16 border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                value={val}
-                onChange={(e) => set(e.target.value)}
-                min="0"
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-      <button
-        type="submit"
-        disabled={loading}
-        className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 transition-colors"
+    <Panel style={{ padding: "16px 20px" }}>
+      {/* Row 1 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
       >
-        {loading ? "Creating…" : "Create campaign"}
-      </button>
-    </form>
+        <span
+          style={{
+            fontFamily: serif,
+            fontSize: 20,
+            color: INK,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {campaign.name}
+        </span>
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 9.5,
+            color: FAINT2,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          CREATED {fmtCreated(campaign.createdAt)} · {total} CONTACTS
+        </span>
+      </div>
+
+      {/* Row 2 – funnel bar */}
+      <div
+        style={{
+          marginTop: 12,
+          height: 12,
+          borderRadius: 6,
+          overflow: "hidden",
+          display: "flex",
+          backgroundColor: "#E4DBC8",
+        }}
+      >
+        {(statsLoading || statsError || !stats || activeStages.length === 0) && (
+          <div style={{ flex: 1, backgroundColor: "#E4DBC8" }} />
+        )}
+        {!statsLoading && !statsError && stats && activeStages.length > 0 &&
+          activeStages.map((s) => (
+            <div
+              key={s}
+              style={{
+                flex: stats.pipeline[s] ?? 0,
+                backgroundColor: PIPELINE_META[s].color,
+              }}
+            />
+          ))
+        }
+      </div>
+
+      {/* Row 3 – legend / loading / error */}
+      <div style={{ marginTop: 10 }}>
+        {statsLoading && (
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 9.5,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: FAINT,
+            }}
+          >
+            LOADING…
+          </span>
+        )}
+        {!statsLoading && statsError && (
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 9.5,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: CLAY,
+            }}
+          >
+            {statsError}
+          </span>
+        )}
+        {!statsLoading && !statsError && stats && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {activeStages.map((s) => (
+              <span
+                key={s}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontFamily: mono,
+                  fontSize: 9.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  color: "#7A6E52",
+                }}
+              >
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: 1,
+                    backgroundColor: PIPELINE_META[s].color,
+                    flexShrink: 0,
+                  }}
+                />
+                {PIPELINE_META[s].label.toUpperCase()} {stats.pipeline[s] ?? 0}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
-// ---- Page ----
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns,   setCampaigns]   = useState<Campaign[]>([]);
   const [leadSources, setLeadSources] = useState<LeadSourceRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
+
+  // Create form
+  const [name,          setName]          = useState("");
+  const [offerSummary,  setOfferSummary]  = useState("");
+  const [toneNotes,     setToneNotes]     = useState("");
+  const [day0,          setDay0]          = useState("0");
+  const [day1,          setDay1]          = useState("5");
+  const [day2,          setDay2]          = useState("9");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError,   setCreateError]   = useState<string | null>(null);
+
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const formRef      = useRef<HTMLDivElement>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -277,65 +276,386 @@ export default function CampaignsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  function focusForm() {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => nameInputRef.current?.focus(), 300);
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateLoading(true);
+    setCreateError(null);
+    const { error: err } = await apiFetch("/api/campaigns", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        offerSummary,
+        toneNotes,
+        sequenceSpacingDays: [
+          parseInt(day0, 10) || 0,
+          parseInt(day1, 10) || 5,
+          parseInt(day2, 10) || 9,
+        ],
+      }),
+    });
+    setCreateLoading(false);
+    if (err) { setCreateError(err); return; }
+    setName(""); setOfferSummary(""); setToneNotes("");
+    setDay0("0"); setDay1("5"); setDay2("9");
+    loadAll();
+  }
+
+  const monoFieldLabel: React.CSSProperties = {
+    fontFamily: mono,
+    fontSize: 9.5,
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    color: FAINT2,
+    display: "block",
+    marginBottom: 5,
+  };
+
+  const LS_COL_NUMS: Array<keyof LeadSourceRow> = ["total", "contacted", "replied", "won"];
+
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">Campaigns</h1>
+    <div style={{ padding: "24px 30px 40px" }}>
 
-      {/* Lead-source breakdown */}
-      {leadSources.length > 0 && (
-        <section>
-          <h2 className="font-semibold text-gray-800 mb-3">Lead source breakdown</h2>
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="px-4 py-3 text-left">Source</th>
-                  <th className="px-4 py-3 text-right">Total</th>
-                  <th className="px-4 py-3 text-right">Contacted</th>
-                  <th className="px-4 py-3 text-right">Replied</th>
-                  <th className="px-4 py-3 text-right">Won</th>
-                  <th className="px-4 py-3 text-right">Reply rate</th>
-                  <th className="px-4 py-3 text-right">Win rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {leadSources.map((row) => (
-                  <tr key={row.leadSource}>
-                    <td className="px-4 py-3 font-medium text-gray-800">
-                      {LEAD_SOURCE_LABELS[row.leadSource] ?? row.leadSource}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-700">{row.total}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{row.contacted}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{row.replied}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{row.won}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">
-                      {(row.replyRate * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-700">
-                      {(row.winRate * 100).toFixed(1)}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {/* Campaign list */}
-      {loading && <p className="text-gray-500 text-sm">Loading&hellip;</p>}
-      {error && <p className="text-red-600">{error}</p>}
-
-      {!loading && campaigns.length === 0 && (
-        <p className="text-gray-400">No campaigns yet.</p>
-      )}
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {campaigns.map((c) => <CampaignCard key={c._id} campaign={c} />)}
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div>
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+              color: FAINT,
+              display: "block",
+              marginBottom: 8,
+            }}
+          >
+            {campaigns.length} ACTIVE CAMPAIGNS
+          </span>
+          <h1
+            style={{
+              fontFamily: serif,
+              fontSize: 34,
+              fontWeight: 400,
+              color: INK,
+              letterSpacing: "-0.01em",
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
+            Campaigns
+          </h1>
+        </div>
+        <Button variant="primary" onClick={focusForm} style={{ marginTop: 4, flexShrink: 0 }}>
+          + New campaign
+        </Button>
       </div>
 
-      {/* Create form */}
-      <CreateCampaignForm onCreated={loadAll} />
-    </main>
+      {/* Body */}
+      <div
+        style={{
+          display: "flex",
+          gap: 20,
+          alignItems: "flex-start",
+          marginTop: 20,
+        }}
+      >
+        {/* LEFT */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          {loading && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: FAINT,
+                display: "block",
+                textAlign: "center",
+                padding: "40px 0",
+              }}
+            >
+              LOADING…
+            </span>
+          )}
+          {!loading && error && (
+            <Panel style={{ padding: "16px 20px" }}>
+              <span style={{ fontFamily: mono, fontSize: 9.5, color: CLAY, textTransform: "uppercase" }}>
+                {error}
+              </span>
+            </Panel>
+          )}
+          {!loading && !error && campaigns.length === 0 && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: FAINT,
+                display: "block",
+                textAlign: "center",
+                padding: "40px 0",
+              }}
+            >
+              NO CAMPAIGNS YET · CREATE ONE TO START
+            </span>
+          )}
+          {campaigns.map((c) => (
+            <CampaignCard key={c._id} campaign={c} />
+          ))}
+
+          {/* Lead sources */}
+          {leadSources.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <SectionHeader title="LEAD SOURCES" />
+              <div style={{ marginTop: 10 }}>
+                <Panel style={{ padding: 0, overflow: "hidden" }}>
+                  {/* Table header */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.4fr repeat(6, 1fr)",
+                      padding: "10px 16px",
+                      borderBottom: "1px solid #E4DBC8",
+                    }}
+                  >
+                    {["SOURCE", "TOTAL", "CONTACTED", "REPLIED", "WON", "REPLY RATE", "WIN RATE"].map(
+                      (col, i) => (
+                        <span
+                          key={col}
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 9,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                            color: FAINT,
+                            textAlign: i === 0 ? "left" : "right",
+                          }}
+                        >
+                          {col}
+                        </span>
+                      )
+                    )}
+                  </div>
+                  {/* Data rows */}
+                  {leadSources.map((row, idx) => (
+                    <div key={row.leadSource}>
+                      {idx > 0 && <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />}
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1.4fr repeat(6, 1fr)",
+                          padding: "10px 16px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontWeight: 600,
+                            fontSize: 13,
+                            color: INK,
+                          }}
+                        >
+                          {LEAD_SOURCE_LABELS[row.leadSource] ?? row.leadSource}
+                        </span>
+                        {LS_COL_NUMS.map((key) => (
+                          <span
+                            key={key}
+                            style={{
+                              fontFamily: mono,
+                              fontSize: 11,
+                              color: "#5A5344",
+                              textAlign: "right",
+                            }}
+                          >
+                            {row[key] as number}
+                          </span>
+                        ))}
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 11,
+                            color: "#5A5344",
+                            textAlign: "right",
+                          }}
+                        >
+                          {(row.replyRate * 100).toFixed(1)}%
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 11,
+                            color: "#5A5344",
+                            textAlign: "right",
+                          }}
+                        >
+                          {(row.winRate * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </Panel>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT – Create form */}
+        <div ref={formRef} style={{ width: 300, flexShrink: 0 }}>
+          <Panel style={{ padding: "18px 20px" }}>
+            <h2
+              style={{
+                fontFamily: serif,
+                fontSize: 20,
+                fontWeight: 400,
+                color: INK,
+                margin: 0,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Create a campaign
+            </h2>
+            <form onSubmit={handleCreate}>
+              {/* Campaign name */}
+              <div style={{ marginTop: 14 }}>
+                <label style={monoFieldLabel}>CAMPAIGN NAME</label>
+                <input
+                  ref={nameInputRef}
+                  className={inputClass}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Q4 Cebu Push"
+                  required
+                />
+              </div>
+
+              {/* Offer summary */}
+              <div style={{ marginTop: 14 }}>
+                <label style={{ ...monoFieldLabel, marginBottom: 5 }}>
+                  OFFER SUMMARY{" "}
+                  <span style={{ color: "#96712A" }}>· FED TO CLAUDE</span>
+                </label>
+                <textarea
+                  className={inputClass}
+                  rows={2}
+                  value={offerSummary}
+                  onChange={(e) => setOfferSummary(e.target.value)}
+                  placeholder="1-week homepage tune-up for SMBs…"
+                  required
+                  style={{ resize: "vertical" }}
+                />
+              </div>
+
+              {/* Tone notes */}
+              <div style={{ marginTop: 14 }}>
+                <label style={monoFieldLabel}>TONE NOTES</label>
+                <input
+                  className={inputClass}
+                  value={toneNotes}
+                  onChange={(e) => setToneNotes(e.target.value)}
+                  placeholder="Warm, Taglish, relationship-first"
+                />
+              </div>
+
+              {/* Sequence spacing */}
+              <div style={{ marginTop: 14 }}>
+                <label style={monoFieldLabel}>SEQUENCE SPACING</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { val: day0, set: setDay0 },
+                    { val: day1, set: setDay1 },
+                    { val: day2, set: setDay2 },
+                  ].map(({ val, set }, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        backgroundColor: "#FCFAF3",
+                        border: "1px solid #D3C9B4",
+                        borderRadius: 7,
+                        overflow: "hidden",
+                        flex: 1,
+                      }}
+                    >
+                      <input
+                        type="number"
+                        value={val}
+                        onChange={(e) => set(e.target.value)}
+                        min="0"
+                        style={{
+                          flex: 1,
+                          border: "none",
+                          background: "transparent",
+                          fontFamily: mono,
+                          fontSize: 13,
+                          color: INK,
+                          textAlign: "center",
+                          padding: "8px 0 8px 8px",
+                          outline: "none",
+                          minWidth: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 11,
+                          color: FAINT2,
+                          paddingRight: 8,
+                          flexShrink: 0,
+                        }}
+                      >
+                        d
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {createError && (
+                <div style={{ marginTop: 12 }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 9.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: CLAY,
+                    }}
+                  >
+                    {createError}
+                  </span>
+                </div>
+              )}
+
+              <div style={{ marginTop: 16 }}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={createLoading}
+                  className="w-full"
+                >
+                  {createLoading ? "Creating…" : "Create campaign"}
+                </Button>
+              </div>
+            </form>
+          </Panel>
+        </div>
+      </div>
+    </div>
   );
 }

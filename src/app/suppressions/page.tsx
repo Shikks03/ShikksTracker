@@ -1,26 +1,49 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Search } from "lucide-react";
+import { Panel, Button, inputClass, monoInputClass } from "@/components/ui";
 
-// ---- Types ----
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
+const INK     = "#1A1712";
+const FAINT   = "#8E836C";
+const FAINT2  = "#9A8F76";
+const CLAY    = "#BC5228";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Suppression {
-  _id: string;
-  email: string;
-  reason: "unsubscribed" | "bounced" | "manual";
+  _id:     string;
+  email:   string;
+  reason:  "unsubscribed" | "bounced" | "manual";
   addedAt: string;
 }
 
 const REASON_OPTIONS = ["unsubscribed", "bounced", "manual"] as const;
+type Reason = typeof REASON_OPTIONS[number];
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: T | null; error: string | null }> {
+const REASON_META: Record<Reason, { squareColor: string; textColor: string; label: string }> = {
+  unsubscribed: { squareColor: "#A23B28", textColor: "#A23B28", label: "UNSUBSCRIBED" },
+  bounced:      { squareColor: "#C68A1E", textColor: "#96712A", label: "BOUNCED" },
+  manual:       { squareColor: "#5B6472", textColor: "#5B6472", label: "MANUAL" },
+};
+
+// ── API helper ────────────────────────────────────────────────────────────────
+
+async function apiFetch<T>(
+  url: string,
+  options?: RequestInit
+): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { data: null, error: body.error ?? `HTTP ${res.status}` };
     }
     return { data: (await res.json()) as T, error: null };
@@ -29,27 +52,27 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: 
   }
 }
 
-function formatDate(d: string): string {
-  return new Date(d).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+function fmtDate(d: string): string {
+  const dt  = new Date(d);
+  const y   = dt.getFullYear();
+  const m   = String(dt.getMonth() + 1).padStart(2, "0");
+  const day = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-// ---- Page ----
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SuppressionsPage() {
   const [suppressions, setSuppressions] = useState<Suppression[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [q, setQ] = useState("");
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [q,            setQ]            = useState("");
 
   // Add form
-  const [addEmail, setAddEmail] = useState("");
-  const [addReason, setAddReason] = useState<typeof REASON_OPTIONS[number]>("manual");
+  const [addEmail,   setAddEmail]   = useState("");
+  const [addReason,  setAddReason]  = useState<Reason>("manual");
   const [addLoading, setAddLoading] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
+  const [addError,   setAddError]   = useState<string | null>(null);
 
   const load = useCallback(async (query: string) => {
     setLoading(true);
@@ -66,13 +89,17 @@ export default function SuppressionsPage() {
 
   useEffect(() => { load(""); }, [load]);
 
-  // Debounce search
+  // Debounced search
   useEffect(() => {
     const t = setTimeout(() => { load(q); }, 300);
     return () => clearTimeout(t);
   }, [q, load]);
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, email: string) {
+    const confirmed = window.confirm(
+      `Remove ${email} from the suppression list? They become contactable again.`
+    );
+    if (!confirmed) return;
     const { error: err } = await apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
     if (err) { setError(err); return; }
     setSuppressions((prev) => prev.filter((s) => s._id !== id));
@@ -94,101 +121,305 @@ export default function SuppressionsPage() {
   }
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Suppressions</h1>
+    <div style={{ padding: "24px 30px 40px" }}>
 
-      {/* Search */}
-      <div>
-        <input
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          placeholder="Search by email&hellip;"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div>
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+              color: FAINT,
+              display: "block",
+              marginBottom: 8,
+            }}
+          >
+            DO-NOT-CONTACT · PH DATA PRIVACY ACT
+          </span>
+          <h1
+            style={{
+              fontFamily: serif,
+              fontSize: 34,
+              fontWeight: 400,
+              color: INK,
+              letterSpacing: "-0.01em",
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
+            Suppression List
+          </h1>
+        </div>
+
+        {/* Search */}
+        <div style={{ position: "relative", width: 220, marginTop: 4, flexShrink: 0 }}>
+          <Search
+            size={13}
+            color={FAINT2}
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+            }}
+          />
+          <input
+            className={monoInputClass}
+            style={{ paddingLeft: 30 }}
+            placeholder="FILTER BY EMAIL…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
       </div>
 
-      {/* Error / loading */}
-      {error && (
-        <p className="text-red-600 bg-red-50 border border-red-200 rounded p-3">{error}</p>
-      )}
-      {loading && <p className="text-gray-500 text-sm">Loading&hellip;</p>}
-
-      {/* Table */}
-      {!loading && (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-3 text-left">Email</th>
-                <th className="px-4 py-3 text-left">Reason</th>
-                <th className="px-4 py-3 text-left">Added</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {suppressions.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-gray-400">
-                    No suppressions found.
-                  </td>
-                </tr>
-              )}
-              {suppressions.map((s) => (
-                <tr key={s._id}>
-                  <td className="px-4 py-3 text-gray-800">{s.email}</td>
-                  <td className="px-4 py-3 text-gray-600">{s.reason}</td>
-                  <td className="px-4 py-3 text-gray-500">{formatDate(s.addedAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDelete(s._id)}
-                      className="text-xs text-red-600 hover:text-red-800 hover:underline"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Add form */}
-      <section className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-        <h2 className="font-semibold text-gray-800">Add suppression</h2>
-        {addError && <p className="text-sm text-red-600">{addError}</p>}
-        <form onSubmit={handleAdd} className="flex flex-wrap gap-3 items-end">
-          <div className="space-y-1 flex-1 min-w-48">
-            <label className="block text-xs font-medium text-gray-600">Email *</label>
+      {/* Add row */}
+      <div style={{ marginTop: 18 }}>
+        <Panel style={{ padding: "12px 14px" }}>
+          <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input
               type="email"
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className={inputClass}
+              style={{ flex: 1, fontFamily: mono, fontSize: 12 }}
+              placeholder="email@to-block.ph"
               value={addEmail}
               onChange={(e) => setAddEmail(e.target.value)}
               required
             />
-          </div>
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-600">Reason</label>
             <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className={inputClass}
+              style={{ width: 170, flexShrink: 0 }}
               value={addReason}
-              onChange={(e) => setAddReason(e.target.value as typeof REASON_OPTIONS[number])}
+              onChange={(e) => setAddReason(e.target.value as Reason)}
             >
-              {REASON_OPTIONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
+              <option value="manual">Reason: Manual</option>
+              <option value="unsubscribed">Reason: Unsubscribed</option>
+              <option value="bounced">Reason: Bounced</option>
             </select>
-          </div>
-          <button
-            type="submit"
-            disabled={addLoading}
-            className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 transition-colors"
+            <Button type="submit" variant="dark" disabled={addLoading} style={{ flexShrink: 0 }}>
+              {addLoading ? "Blocking…" : "Block email"}
+            </Button>
+          </form>
+          {addError && (
+            <div style={{ marginTop: 8 }}>
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 9.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: CLAY,
+                }}
+              >
+                {addError}
+              </span>
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {/* Table */}
+      <div style={{ marginTop: 14 }}>
+        {loading && (
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 9.5,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: FAINT,
+              display: "block",
+              padding: "20px 0",
+            }}
           >
-            {addLoading ? "Adding…" : "Add"}
-          </button>
-        </form>
-      </section>
-    </main>
+            LOADING…
+          </span>
+        )}
+        {!loading && error && (
+          <Panel style={{ padding: "16px 20px" }}>
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 9.5,
+                color: CLAY,
+                textTransform: "uppercase",
+              }}
+            >
+              {error}
+            </span>
+          </Panel>
+        )}
+        {!loading && !error && (
+          <Panel style={{ padding: 0, overflow: "hidden" }}>
+            {/* Header row */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.6fr 1fr 1fr 90px",
+                padding: "10px 16px",
+                borderBottom: "1px solid #E4DBC8",
+              }}
+            >
+              {["EMAIL", "REASON", "DATE ADDED", ""].map((col, i) => (
+                <span
+                  key={i}
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 9,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.12em",
+                    color: FAINT,
+                    textAlign: i === 3 ? "right" : "left",
+                  }}
+                >
+                  {col}
+                </span>
+              ))}
+            </div>
+
+            {/* Empty state */}
+            {suppressions.length === 0 && (
+              <div style={{ padding: "20px 16px", textAlign: "center" }}>
+                <span
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 9.5,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: FAINT,
+                  }}
+                >
+                  NO SUPPRESSED EMAILS
+                </span>
+              </div>
+            )}
+
+            {/* Data rows */}
+            {suppressions.map((s, idx) => {
+              const meta = REASON_META[s.reason];
+              return (
+                <div key={s._id}>
+                  {idx > 0 && <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.6fr 1fr 1fr 90px",
+                      padding: "11px 16px",
+                      alignItems: "center",
+                    }}
+                  >
+                    {/* Email */}
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 11.5,
+                        color: INK,
+                      }}
+                    >
+                      {s.email}
+                    </span>
+
+                    {/* Reason */}
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        color: meta.textColor,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: 1,
+                          backgroundColor: meta.squareColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                      {meta.label}
+                    </span>
+
+                    {/* Date */}
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10,
+                        color: FAINT2,
+                      }}
+                    >
+                      {fmtDate(s.addedAt)}
+                    </span>
+
+                    {/* Remove */}
+                    <div style={{ textAlign: "right" }}>
+                      <RemoveButton
+                        onClick={() => handleDelete(s._id, s.email)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Footer strip */}
+            <div
+              style={{
+                borderTop: "1px solid #E4DBC8",
+                backgroundColor: "#F1EBDD",
+                padding: "9px 16px",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 9,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  color: FAINT,
+                }}
+              >
+                {suppressions.length} SUPPRESSED · CHECKED ON EVERY IMPORT AND BEFORE EVERY SEND
+              </span>
+            </div>
+          </Panel>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Remove button (isolated to avoid inline onMouseEnter casting) ──────────────
+
+function RemoveButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        fontFamily: "var(--font-familjen)",
+        fontSize: 12,
+        color: hovered ? "#A23B28" : "#8E836C",
+        textDecoration: hovered ? "underline" : "none",
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        padding: 0,
+        transition: "color 0.1s",
+      }}
+    >
+      Remove
+    </button>
   );
 }
