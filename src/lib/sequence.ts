@@ -23,6 +23,7 @@ import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
 import type { ICampaign } from "@/models/Campaign";
 import { randomUUID } from "crypto";
+import { checkReplies } from "@/lib/replies";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -133,19 +134,6 @@ async function fetchRfcMessageId(gmailMessageId: string): Promise<string | null>
     console.warn(`[sequence] fetchRfcMessageId failed for ${gmailMessageId}:`, err);
     return null;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Phase A: checkReplies (stub — Phase 9 slots in here)
-// ---------------------------------------------------------------------------
-
-interface RepliesResult {
-  checked: number;
-}
-
-// TODO Phase 9: implement reply detection via Gmail API history/search.
-async function checkReplies(): Promise<RepliesResult> {
-  return { checked: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +433,8 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
 
 export interface RunSummary {
   repliesChecked: number;
+  replied: number;
+  unsubscribed: number;
   draftsCreated: number;
   sent: number;
   skipped: string[];
@@ -471,9 +461,11 @@ export async function runSequenceEngine(): Promise<RunSummary> {
 
   return {
     repliesChecked: repliesResult.checked,
+    replied: repliesResult.replied,
+    unsubscribed: repliesResult.unsubscribed,
     draftsCreated: draftsResult.created,
     sent: sendsResult.sent,
     skipped: sendsResult.skipped,
-    errors: [...draftsResult.errors, ...sendsResult.errors],
+    errors: [...repliesResult.errors, ...draftsResult.errors, ...sendsResult.errors],
   };
 }
