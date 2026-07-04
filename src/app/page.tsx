@@ -1,10 +1,39 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import StatusBadge from "@/components/StatusBadge";
+import Link from "next/link";
+import { Search } from "lucide-react";
+import {
+  MonoLabel,
+  Panel,
+  InitialsTile,
+  HotChip,
+  PIPELINE_META,
+  PipelineMarker,
+  SectionHeader,
+  monoInputClass,
+} from "@/components/ui";
+import { useNextSendCountdown } from "@/components/useNextSendCountdown";
 
-// ---- Types ----
+// ── Design tokens (module-level constants, safe to reference in sub-components)
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
+
+const INK        = "#1A1712";
+const FAINT      = "#8E836C";
+const FAINT2     = "#9A8F76";
+const CLAY       = "#BC5228";
+const AMBER      = "#C68A1E";
+const AMBER_TEXT = "#96712A";
+const HOT_TEXT   = "#8A6212";
+const GREEN_SENT = "#5A7D5A";
+const HOT_BG     = "#F6ECCE";
+
+const HOT_THRESHOLD = 5;
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface Campaign {
   _id: string;
@@ -19,243 +48,716 @@ interface ContactRow {
   leadSource: string;
   pipelineStage: string;
   status: string;
-  currentStage: number;
   engagementScore: number;
   lastSentAt?: string | null;
   opened?: boolean;
   clicked?: boolean;
   replied?: boolean;
+  repliedAt?: string | null;
+  replySnippet?: string | null;
+  lastLogStage?: 1 | 2 | 3 | null;
+  lastLogStatus?: "draft" | "approved" | "sent" | null;
 }
 
-const PIPELINE_LABELS: Record<string, string> = {
-  not_started: "Not started",
-  contacted: "Contacted",
-  replied: "Replied",
-  call_booked: "Call booked",
-  proposal_sent: "Proposal sent",
-  won: "Won",
-  lost: "Lost",
-};
+type RowGroup = "replied" | "in_sequence" | "closed";
 
-const LEAD_SOURCE_LABELS: Record<string, string> = {
-  cold_email: "Cold email",
-  referral: "Referral",
-  event_connection: "Event",
-  other: "Other",
-};
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const STATUS_OPTIONS = ["", "active", "paused", "replied", "bounced", "unsubscribed"];
-const PIPELINE_OPTIONS = ["", "not_started", "contacted", "replied", "call_booked", "proposal_sent", "won", "lost"];
-const LEAD_SOURCE_OPTIONS = ["", "cold_email", "referral", "event_connection", "other"];
-
-const HOT_THRESHOLD = 5;
-
-function formatDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+function timeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (hours < 24) return `${hours}H AGO`;
+  return `${days}D AGO`;
 }
 
-function Check({ val }: { val?: boolean }) {
-  return <span className={val ? "text-green-600 font-bold" : "text-gray-300"}>{val ? "✓" : "—"}</span>;
+function ordinal(n: number | null | undefined): string {
+  if (!n || n === 1) return "1ST";
+  if (n === 2) return "2ND";
+  if (n === 3) return "3RD";
+  return `${n}TH`;
 }
 
-// ---- Page ----
+function shortDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  return new Date(dateStr)
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    .toUpperCase();
+}
 
-export default function ContactsDashboard() {
-  const router = useRouter();
+function getManilaGreeting(): string {
+  const manilaHour = (new Date().getUTCHours() + 8) % 24;
+  if (manilaHour < 12) return "umaga";
+  if (manilaHour < 18) return "hapon";
+  return "gabi";
+}
 
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [contacts, setContacts] = useState<ContactRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function getKickerDate(): string {
+  const now = new Date();
+  const DAY = ["SUNDAY","MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"];
+  const MON = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  return `${DAY[now.getDay()]} · ${MON[now.getMonth()]} ${now.getDate()}`;
+}
+
+// Row meta builders
+function repliedMeta(c: ContactRow): string {
+  const name = (c.contactName || c.contactEmail).toUpperCase();
+  const parts: string[] = [name];
+  if (c.repliedAt) parts.push(`REPLIED ${timeAgo(c.repliedAt)}`);
+  if (c.replySnippet) parts.push(`"${c.replySnippet}"`);
+  return parts.join(" · ");
+}
+
+function inSequenceMeta(c: ContactRow): string {
+  const name = (c.contactName || c.contactEmail).toUpperCase();
+  const ord  = ordinal(c.lastLogStage);
+  if (!c.lastLogStage) return `${name} · QUEUED`;
+  if (c.lastLogStatus === "draft" || c.lastLogStatus === "approved") {
+    return `${name} · ${ord} TOUCH DRAFT READY`;
+  }
+  if (c.lastLogStatus === "sent" && c.lastSentAt) {
+    return `${name} · ${ord} TOUCH SENT ${shortDate(c.lastSentAt)}`;
+  }
+  return `${name} · QUEUED`;
+}
+
+function closedMeta(c: ContactRow): string {
+  const name  = (c.contactName || c.contactEmail).toUpperCase();
+  const stage = c.pipelineStage === "won" ? "WON" : "LOST";
+  return `${name} · ${stage}`;
+}
+
+// ── Row component (module-level so React reconciles by type, not position) ────
+
+function ContactRowItem({
+  c,
+  group,
+  onNavigate,
+}: {
+  c: ContactRow;
+  group: RowGroup;
+  onNavigate: (id: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isHot  = (c.engagementScore ?? 0) >= HOT_THRESHOLD;
+  const ord    = ordinal(c.lastLogStage);
+  const score  = c.engagementScore ?? 0;
+
+  let meta = "";
+  if (group === "replied")      meta = repliedMeta(c);
+  else if (group === "in_sequence") meta = inSequenceMeta(c);
+  else                          meta = closedMeta(c);
+
+  const rowBg = isHot ? HOT_BG : (hovered ? "#FBF8F0" : "transparent");
+
+  return (
+    <div
+      onClick={() => onNavigate(c._id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "13px 16px",
+        cursor: "pointer",
+        backgroundColor: rowBg,
+        boxShadow: isHot ? "inset 4px 0 0 #C68A1E" : undefined,
+        transition: "background-color 0.1s",
+      }}
+    >
+      {/* Initials tile */}
+      <InitialsTile name={c.businessName} size={34} />
+
+      {/* Main column */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              fontFamily: grotesk,
+              fontWeight: 600,
+              fontSize: 14,
+              color: INK,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {c.businessName}
+          </span>
+          {isHot && <HotChip />}
+        </div>
+        <div
+          style={{
+            fontFamily: mono,
+            fontSize: 9.5,
+            color: FAINT2,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            marginTop: 2,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {meta}
+        </div>
+      </div>
+
+      {/* Right cluster */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        <PipelineMarker stage={c.pipelineStage} />
+
+        {group === "in_sequence" && c.lastLogStage != null && (
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: c.lastLogStatus === "sent" ? GREEN_SENT : FAINT2,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {c.lastLogStatus === "sent" ? "SENT" : "DRAFT"} · {ord}
+          </span>
+        )}
+
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 15,
+            fontWeight: 700,
+            width: 26,
+            textAlign: "right",
+            color: isHot ? HOT_TEXT : "#5A5344",
+            flexShrink: 0,
+          }}
+        >
+          {score}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function GroupPanel({
+  rows,
+  group,
+  onNavigate,
+}: {
+  rows: ContactRow[];
+  group: RowGroup;
+  onNavigate: (id: string) => void;
+}) {
+  return (
+    <Panel style={{ padding: 0, overflow: "hidden" }}>
+      {rows.map((c, idx) => (
+        <div key={c._id}>
+          {idx > 0 && (
+            <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />
+          )}
+          <ContactRowItem c={c} group={group} onNavigate={onNavigate} />
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Dashboard() {
+  const router    = useRouter();
+  const countdown = useNextSendCountdown();
+  const repliedRef = useRef<HTMLDivElement>(null);
+
+  const [campaigns,     setCampaigns]     = useState<Campaign[]>([]);
+  const [contacts,      setContacts]      = useState<ContactRow[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState<string | null>(null);
+  const [draftCount,    setDraftCount]    = useState(0);
 
   // Filter state
-  const [campaignId, setCampaignId] = useState("");
+  const [search,        setSearch]        = useState("");
+  const [campaignId,    setCampaignId]    = useState("");
   const [pipelineStage, setPipelineStage] = useState("");
-  const [leadSource, setLeadSource] = useState("");
-  const [status, setStatus] = useState("");
-  const [hotOnly, setHotOnly] = useState(false);
-  const [sortByScore, setSortByScore] = useState(false);
+  const [leadSource,    setLeadSource]    = useState("");
+  const [hotOnly,       setHotOnly]       = useState(false);
+  const [sortByScore,   setSortByScore]   = useState(true);
 
-  // Load campaigns once
+  // One-time: campaigns + draft count
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
-      // API errors return { error } — only accept an array (filter stays usable without it)
-      .then((data: unknown) => {
-        if (Array.isArray(data)) setCampaigns(data as Campaign[]);
+      .then((d: unknown) => {
+        if (Array.isArray(d)) setCampaigns(d as Campaign[]);
       })
-      .catch(() => {/* non-fatal */});
+      .catch(() => {});
+
+    fetch("/api/email-logs?status=draft")
+      .then((r) => r.json())
+      .then((d: unknown) => {
+        if (Array.isArray(d)) setDraftCount(d.length);
+      })
+      .catch(() => {});
   }, []);
 
+  // Contacts — re-fetched on filter change
   const loadContacts = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ stats: "true" });
-    if (campaignId) params.set("campaignId", campaignId);
-    if (pipelineStage) params.set("pipelineStage", pipelineStage);
-    if (leadSource) params.set("leadSource", leadSource);
-    if (status) params.set("status", status);
-    if (hotOnly) params.set("hot", "true");
-    if (sortByScore) params.set("sort", "score");
-
+    const p = new URLSearchParams({ stats: "true" });
+    if (campaignId)    p.set("campaignId",    campaignId);
+    if (pipelineStage) p.set("pipelineStage", pipelineStage);
+    if (leadSource)    p.set("leadSource",    leadSource);
+    if (hotOnly)       p.set("hot",           "true");
+    if (sortByScore)   p.set("sort",          "score");
     try {
-      const res = await fetch(`/api/contacts?${params.toString()}`);
+      const res = await fetch(`/api/contacts?${p.toString()}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
         setError(body.error ?? `HTTP ${res.status}`);
         return;
       }
-      const data = (await res.json()) as ContactRow[];
-      setContacts(data);
+      setContacts(await res.json() as ContactRow[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [campaignId, pipelineStage, leadSource, status, hotOnly, sortByScore]);
+  }, [campaignId, pipelineStage, leadSource, hotOnly, sortByScore]);
 
-  useEffect(() => {
-    loadContacts();
-  }, [loadContacts]);
+  useEffect(() => { loadContacts(); }, [loadContacts]);
+
+  // Client-side search filter
+  const filtered = search.trim()
+    ? contacts.filter(({ businessName, contactName, contactEmail }) => {
+        const q = search.toLowerCase();
+        return (
+          businessName.toLowerCase().includes(q) ||
+          (contactName?.toLowerCase().includes(q) ?? false) ||
+          contactEmail.toLowerCase().includes(q)
+        );
+      })
+    : contacts;
+
+  // Derived groups
+  const repliedGroup = [...filtered]
+    .filter((c) => ["replied", "call_booked", "proposal_sent"].includes(c.pipelineStage))
+    .sort((a, b) => {
+      const da = a.repliedAt ? new Date(a.repliedAt).getTime() : 0;
+      const db = b.repliedAt ? new Date(b.repliedAt).getTime() : 0;
+      return db - da;
+    });
+
+  const inSequenceGroup = filtered.filter((c) =>
+    ["not_started", "contacted"].includes(c.pipelineStage)
+  );
+
+  const closedGroup = filtered.filter((c) =>
+    ["won", "lost"].includes(c.pipelineStage)
+  );
+
+  const navigate = useCallback((id: string) => router.push(`/contacts/${id}`), [router]);
+
+  const noContacts = !loading && !error && filtered.length === 0;
+  const kickerDate = getKickerDate();
+  const greeting   = getManilaGreeting();
+
+  // Styled select (chip appearance)
+  const selectStyle: React.CSSProperties = {
+    fontFamily: mono,
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    border: "1px solid #D3C9B4",
+    backgroundColor: "transparent",
+    borderRadius: 6,
+    padding: "5px 24px 5px 10px",
+    color: INK,
+    cursor: "pointer",
+    appearance: "none",
+    outline: "none",
+  };
 
   return (
-    <main className="max-w-7xl mx-auto p-6">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Contacts</h1>
+    <div style={{ padding: "24px 30px 40px", minHeight: "100%" }}>
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3 mb-6 items-center bg-white border border-gray-200 rounded-lg p-4">
-        <select
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={campaignId}
-          onChange={(e) => setCampaignId(e.target.value)}
-        >
-          <option value="">All campaigns</option>
-          {campaigns.map((c) => (
-            <option key={c._id} value={c._id}>{c.name}</option>
-          ))}
-        </select>
+      {/* ── 1. HEADER ── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        {/* Left: kicker + greeting */}
+        <div>
+          <MonoLabel
+            style={{
+              fontSize: 10,
+              letterSpacing: "0.14em",
+              color: FAINT,
+              display: "block",
+              marginBottom: 8,
+            }}
+          >
+            {kickerDate} · {repliedGroup.length} REPLIED / {draftCount} DRAFTS
+          </MonoLabel>
+          <h1
+            style={{
+              fontFamily: serif,
+              fontSize: 40,
+              fontWeight: 400,
+              color: INK,
+              letterSpacing: "-0.01em",
+              lineHeight: 1.1,
+              margin: 0,
+            }}
+          >
+            Magandang {greeting}, Shikks
+          </h1>
+        </div>
 
-        <select
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={pipelineStage}
-          onChange={(e) => setPipelineStage(e.target.value)}
-        >
-          <option value="">All pipeline stages</option>
-          {PIPELINE_OPTIONS.filter(Boolean).map((s) => (
-            <option key={s} value={s}>{PIPELINE_LABELS[s] ?? s}</option>
-          ))}
-        </select>
-
-        <select
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={leadSource}
-          onChange={(e) => setLeadSource(e.target.value)}
-        >
-          <option value="">All lead sources</option>
-          {LEAD_SOURCE_OPTIONS.filter(Boolean).map((s) => (
-            <option key={s} value={s}>{LEAD_SOURCE_LABELS[s] ?? s}</option>
-          ))}
-        </select>
-
-        <select
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.filter(Boolean).map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-
-        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={hotOnly}
-            onChange={(e) => setHotOnly(e.target.checked)}
-            className="rounded"
+        {/* Right: search input */}
+        <div style={{ position: "relative", width: 200, marginTop: 4, flexShrink: 0 }}>
+          <Search
+            size={13}
+            color={FAINT2}
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+            }}
           />
-          Hot leads only
-        </label>
-
-        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
           <input
-            type="checkbox"
-            checked={sortByScore}
-            onChange={(e) => setSortByScore(e.target.checked)}
-            className="rounded"
+            className={monoInputClass}
+            style={{ paddingLeft: 30 }}
+            placeholder="SEARCH…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
-          Sort by score
-        </label>
+        </div>
       </div>
 
-      {/* Error / loading */}
-      {error && (
-        <p className="text-red-600 bg-red-50 border border-red-200 rounded p-3 mb-4">{error}</p>
-      )}
-      {loading && <p className="text-gray-500 text-sm mb-4">Loading&hellip;</p>}
-
-      {/* Table */}
-      {!loading && (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-3 text-left">Business</th>
-                <th className="px-4 py-3 text-left">Email</th>
-                <th className="px-4 py-3 text-left">Lead source</th>
-                <th className="px-4 py-3 text-left">Pipeline stage</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-center">Seq</th>
-                <th className="px-4 py-3 text-left">Last sent</th>
-                <th className="px-4 py-3 text-center">Opened</th>
-                <th className="px-4 py-3 text-center">Clicked</th>
-                <th className="px-4 py-3 text-center">Replied</th>
-                <th className="px-4 py-3 text-center">Score</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {contacts.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="px-4 py-6 text-center text-gray-400">
-                    No contacts found.
-                  </td>
-                </tr>
-              )}
-              {contacts.map((c) => (
-                <tr
-                  key={c._id}
-                  className="hover:bg-gray-50 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/contacts/${c._id}`)}
-                >
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.businessName}</td>
-                  <td className="px-4 py-3 text-gray-600">{c.contactEmail}</td>
-                  <td className="px-4 py-3 text-gray-600">{LEAD_SOURCE_LABELS[c.leadSource] ?? c.leadSource}</td>
-                  <td className="px-4 py-3 text-gray-600">{PIPELINE_LABELS[c.pipelineStage] ?? c.pipelineStage}</td>
-                  <td className="px-4 py-3"><StatusBadge value={c.status} /></td>
-                  <td className="px-4 py-3 text-center text-gray-600">{c.currentStage}</td>
-                  <td className="px-4 py-3 text-gray-500">{formatDate(c.lastSentAt)}</td>
-                  <td className="px-4 py-3 text-center"><Check val={c.opened} /></td>
-                  <td className="px-4 py-3 text-center"><Check val={c.clicked} /></td>
-                  <td className="px-4 py-3 text-center"><Check val={c.replied} /></td>
-                  <td className="px-4 py-3 text-center">
-                    <span
-                      className={
-                        (c.engagementScore ?? 0) >= HOT_THRESHOLD
-                          ? "font-bold text-orange-600"
-                          : "text-gray-700"
-                      }
-                    >
-                      {c.engagementScore ?? 0}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* ── 2. PRIORITY PANELS ── */}
+      <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+        {/* Replies panel */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => repliedRef.current?.scrollIntoView({ behavior: "smooth" })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") repliedRef.current?.scrollIntoView({ behavior: "smooth" });
+          }}
+          style={{
+            flex: 1,
+            backgroundColor: "#F8F5EC",
+            border: "1px solid #D3C9B4",
+            borderLeft: `3px solid ${CLAY}`,
+            borderRadius: 10,
+            padding: "14px 16px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: serif,
+              fontSize: 38,
+              fontWeight: 400,
+              color: INK,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            {repliedGroup.length}
+          </span>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontFamily: grotesk,
+                fontWeight: 600,
+                fontSize: 14,
+                color: INK,
+                lineHeight: 1.2,
+              }}
+            >
+              New replies
+            </div>
+            <MonoLabel style={{ color: FAINT, display: "block", marginTop: 3 }}>
+              YOUR PERSONAL FOLLOW-UP
+            </MonoLabel>
+          </div>
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              color: CLAY,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              flexShrink: 0,
+            }}
+          >
+            OPEN →
+          </span>
         </div>
-      )}
-    </main>
+
+        {/* Drafts panel */}
+        <Link
+          href="/review"
+          style={{
+            flex: 1,
+            backgroundColor: "#F8F5EC",
+            border: "1px solid #D3C9B4",
+            borderLeft: `3px solid ${AMBER}`,
+            borderRadius: 10,
+            padding: "14px 16px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: serif,
+              fontSize: 38,
+              fontWeight: 400,
+              color: INK,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            {draftCount}
+          </span>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontFamily: grotesk,
+                fontWeight: 600,
+                fontSize: 14,
+                color: INK,
+                lineHeight: 1.2,
+              }}
+            >
+              Drafts to approve
+            </div>
+            <MonoLabel style={{ color: FAINT, display: "block", marginTop: 3 }}>
+              BEFORE NEXT SEND · {countdown}
+            </MonoLabel>
+          </div>
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              color: AMBER_TEXT,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              flexShrink: 0,
+            }}
+          >
+            REVIEW →
+          </span>
+        </Link>
+      </div>
+
+      {/* ── 3. FILTER ROW ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 18,
+          flexWrap: "wrap",
+        }}
+      >
+        <MonoLabel style={{ color: FAINT, marginRight: 4 }}>FILTER</MonoLabel>
+
+        {/* Campaign chip */}
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <select
+            value={campaignId}
+            onChange={(e) => setCampaignId(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">CAMPAIGN</option>
+            {campaigns.map((c) => (
+              <option key={c._id} value={c._id}>
+                {c.name.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+            ▾
+          </span>
+        </div>
+
+        {/* Stage chip */}
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <select
+            value={pipelineStage}
+            onChange={(e) => setPipelineStage(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">STAGE</option>
+            {Object.entries(PIPELINE_META).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+            ▾
+          </span>
+        </div>
+
+        {/* Source chip */}
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <select
+            value={leadSource}
+            onChange={(e) => setLeadSource(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">SOURCE</option>
+            <option value="cold_email">COLD EMAIL</option>
+            <option value="referral">REFERRAL</option>
+            <option value="event_connection">EVENT</option>
+            <option value="other">OTHER</option>
+          </select>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+            ▾
+          </span>
+        </div>
+
+        {/* HOT ONLY toggle */}
+        <button
+          onClick={() => setHotOnly((v) => !v)}
+          style={{
+            fontFamily: mono,
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            border: "1px solid #D8B45E",
+            backgroundColor: hotOnly ? "#F3E9CE" : "transparent",
+            borderRadius: 6,
+            padding: "5px 10px",
+            color: HOT_TEXT,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              backgroundColor: HOT_TEXT,
+              display: "inline-block",
+              flexShrink: 0,
+            }}
+          />
+          HOT ONLY
+        </button>
+
+        {/* Sort toggle — right-aligned */}
+        <button
+          onClick={() => setSortByScore((v) => !v)}
+          style={{
+            marginLeft: "auto",
+            fontFamily: mono,
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            background: "none",
+            border: "none",
+            color: FAINT,
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          {sortByScore ? "SORT: ENGAGEMENT ↓" : "SORT: NEWEST"}
+        </button>
+      </div>
+
+      {/* ── 4. CONTACT GROUPS ── */}
+      <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 26 }}>
+
+        {/* Loading state */}
+        {loading && (
+          <MonoLabel
+            style={{
+              display: "block",
+              textAlign: "center",
+              padding: "40px 0",
+              color: FAINT,
+            }}
+          >
+            LOADING…
+          </MonoLabel>
+        )}
+
+        {/* Error state */}
+        {!loading && error && (
+          <Panel style={{ padding: "16px 20px" }}>
+            <MonoLabel style={{ color: CLAY }}>{error}</MonoLabel>
+          </Panel>
+        )}
+
+        {/* Empty state */}
+        {noContacts && (
+          <MonoLabel
+            style={{
+              display: "block",
+              textAlign: "center",
+              padding: "40px 0",
+              color: FAINT,
+            }}
+          >
+            NO CONTACTS YET · IMPORT A CSV TO GET STARTED
+          </MonoLabel>
+        )}
+
+        {!loading && !error && (
+          <>
+            {/* REPLIED — YOUR MOVE */}
+            {repliedGroup.length > 0 && (
+              <div ref={repliedRef}>
+                <SectionHeader
+                  title="REPLIED — YOUR MOVE"
+                  count={repliedGroup.length}
+                  accent={CLAY}
+                />
+                <div style={{ marginTop: 10 }}>
+                  <GroupPanel rows={repliedGroup} group="replied" onNavigate={navigate} />
+                </div>
+              </div>
+            )}
+
+            {/* IN SEQUENCE */}
+            {inSequenceGroup.length > 0 && (
+              <div>
+                <SectionHeader title="IN SEQUENCE" count={inSequenceGroup.length} />
+                <div style={{ marginTop: 10 }}>
+                  <GroupPanel rows={inSequenceGroup} group="in_sequence" onNavigate={navigate} />
+                </div>
+              </div>
+            )}
+
+            {/* CLOSED */}
+            {closedGroup.length > 0 && (
+              <div>
+                <SectionHeader title="CLOSED" count={closedGroup.length} />
+                <div style={{ marginTop: 10 }}>
+                  <GroupPanel rows={closedGroup} group="closed" onNavigate={navigate} />
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }
