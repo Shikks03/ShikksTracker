@@ -6,6 +6,15 @@ import { createContactChecked, CreateContactInput } from "@/lib/contacts";
 
 export const dynamic = "force-dynamic";
 
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const HOT_LEAD_THRESHOLD = envInt("HOT_LEAD_THRESHOLD", 5);
+
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
@@ -17,17 +26,102 @@ export async function GET(request: NextRequest) {
     const pipelineStage = searchParams.get("pipelineStage");
     const leadSource = searchParams.get("leadSource");
     const sort = searchParams.get("sort");
+    const hot = searchParams.get("hot");
+    const stats = searchParams.get("stats");
 
     if (campaignId) filter.campaignId = campaignId;
     if (status) filter.status = status;
     if (pipelineStage) filter.pipelineStage = pipelineStage;
     if (leadSource) filter.leadSource = leadSource;
+    if (hot === "true") filter.engagementScore = { $gte: HOT_LEAD_THRESHOLD };
 
+    if (stats === "true") {
+      // Aggregation: join with emaillogs to compute per-contact stats
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pipeline: any[] = [
+        { $match: filter },
+        { $sort: sort === "score" ? { engagementScore: -1 } : { createdAt: -1 } },
+        {
+          $lookup: {
+            from: "emaillogs",
+            localField: "_id",
+            foreignField: "contactId",
+            as: "logs",
+          },
+        },
+        {
+          $addFields: {
+            lastSentAt: {
+              $max: {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: "$logs",
+                      as: "l",
+                      cond: { $eq: ["$$l.status", "sent"] },
+                    },
+                  },
+                  as: "sl",
+                  in: "$$sl.sentAt",
+                },
+              },
+            },
+            opened: {
+              $gt: [
+                {
+                  $size: {
+                    $filter: {
+                      input: "$logs",
+                      as: "l",
+                      cond: { $gt: ["$$l.openCount", 0] },
+                    },
+                  },
+                },
+                0,
+              ],
+            },
+            clicked: {
+              $gt: [
+                {
+                  $size: {
+                    $filter: {
+                      input: "$logs",
+                      as: "l",
+                      cond: { $gt: ["$$l.clickCount", 0] },
+                    },
+                  },
+                },
+                0,
+              ],
+            },
+            replied: {
+              $gt: [
+                {
+                  $size: {
+                    $filter: {
+                      input: "$logs",
+                      as: "l",
+                      cond: { $eq: ["$$l.replied", true] },
+                    },
+                  },
+                },
+                0,
+              ],
+            },
+          },
+        },
+        { $unset: "logs" },
+      ];
+
+      const contacts = await Contact.aggregate(pipeline);
+      return NextResponse.json(contacts);
+    }
+
+    // Plain path (no stats)
     let query = Contact.find(filter);
     if (sort === "score") {
       query = query.sort({ engagementScore: -1 });
     }
-
     const contacts = await query.lean();
     return NextResponse.json(contacts);
   } catch (err) {
