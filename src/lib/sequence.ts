@@ -11,7 +11,8 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import Campaign from "@/models/Campaign";
 import EmailLog from "@/models/EmailLog";
-import { generateEmailDraft, bodyToHtml } from "@/lib/draft";
+import { generateEmailDraft } from "@/lib/draft";
+import { extractAndRewriteLinks, renderTrackedHtml } from "@/lib/tracking";
 import {
   sendGmailMessage,
   getGmailClient,
@@ -21,6 +22,7 @@ import {
 import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
 import type { ICampaign } from "@/models/Campaign";
+import { randomUUID } from "crypto";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -108,20 +110,6 @@ export function computeNextSendAt(
 ): Date {
   const days = spacingDays[nextStage - 1] ?? (nextStage === 2 ? 5 : 9);
   return new Date(firstSentAt.getTime() + days * 24 * 60 * 60 * 1000);
-}
-
-// ---------------------------------------------------------------------------
-// Internal: render email HTML (stub for Phase 7 pixel + Phase 8 link rewriting)
-// ---------------------------------------------------------------------------
-
-/**
- * Converts an EmailLog's body to HTML for sending.
- *
- * TODO Phase 7: inject tracking pixel.
- * TODO Phase 8: rewrite links with tracking wrappers.
- */
-function renderEmailHtml(log: IEmailLog): string {
-  return bodyToHtml(log.body);
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +352,11 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
         }
       }
 
-      const htmlBody = renderEmailHtml(log);
+      // Phase 7+8: generate tracking ids locally (not persisted until post-send
+      // update so a failed send retries cleanly with fresh ids next run).
+      const trackingPixelId = randomUUID();
+      const { links } = extractAndRewriteLinks(log.body);
+      const htmlBody = renderTrackedHtml(log.body, links, trackingPixelId);
 
       // Send
       const { messageId, threadId: returnedThreadId } = await sendGmailMessage({
@@ -381,13 +373,15 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
       // Fetch RFC Message-ID (best-effort; failure doesn't block the send record)
       const rfcMessageId = await fetchRfcMessageId(messageId);
 
-      // Update log
+      // Update log — include tracking ids in the same atomic update as status "sent"
       await EmailLog.findByIdAndUpdate(log._id, {
         status: "sent",
         sentAt,
         gmailMessageId: messageId,
         gmailThreadId: returnedThreadId,
         rfcMessageId,
+        trackingPixelId,
+        links,
       });
 
       // Update contact
