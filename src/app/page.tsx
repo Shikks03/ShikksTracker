@@ -81,7 +81,10 @@ export default function ContactsDashboard() {
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
-      .then((data: Campaign[]) => setCampaigns(data))
+      // API errors return { error } — only accept an array (filter stays usable without it)
+      .then((data: unknown) => {
+        if (Array.isArray(data)) setCampaigns(data as Campaign[]);
+      })
       .catch(() => {/* non-fatal */});
   }, []);
 

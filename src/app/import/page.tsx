@@ -33,9 +33,12 @@ export default function ImportPage() {
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
-      .then((data: Campaign[]) => {
-        setCampaigns(data);
-        if (data.length > 0) setCampaignId(data[0]._id);
+      // API errors return { error } — only accept an array
+      .then((data: unknown) => {
+        if (!Array.isArray(data)) return;
+        const list = data as Campaign[];
+        setCampaigns(list);
+        if (list.length > 0) setCampaignId(list[0]._id);
       })
       .catch((err) => console.error("Failed to load campaigns", err));
   }, []);
