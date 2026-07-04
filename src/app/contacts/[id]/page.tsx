@@ -1,10 +1,99 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
-import StatusBadge from "@/components/StatusBadge";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { Check } from "lucide-react";
+import {
+  MonoLabel,
+  Panel,
+  InitialsTile,
+  PIPELINE_META,
+  Button,
+} from "@/components/ui";
 
-// ---- Types ----
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const serif   = "var(--font-instrument-serif)";
+const grotesk = "var(--font-familjen)";
+const mono    = "var(--font-jetbrains)";
+
+const INK    = "#1A1712";
+const FAINT  = "#8E836C";
+const FAINT2 = "#9A8F76";
+const CLAY   = "#BC5228";
+const FOREST = "#1C6E3A";
+
+const HOT_THRESHOLD = 5;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function ordinal(n: 1 | 2 | 3): string {
+  if (n === 1) return "1ST";
+  if (n === 2) return "2ND";
+  return "3RD";
+}
+
+function fmtShortDate(d: string | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d)
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
+function fmtDateTime(d: string | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+// ── Static maps ───────────────────────────────────────────────────────────────
+
+const LEAD_SOURCE_MAP: Record<string, string> = {
+  cold_email:       "COLD EMAIL",
+  referral:         "REFERRAL",
+  event_connection: "EVENT",
+  other:            "OTHER",
+};
+
+// Pipeline stage numeric order
+const PIPELINE_ORDER: Record<string, number> = {
+  not_started:   0,
+  contacted:     1,
+  replied:       2,
+  call_booked:   3,
+  proposal_sent: 4,
+  won:           5,
+  lost:          5,
+};
+
+// The 4 non-terminal checklist rows
+const CHECKLIST_ROWS = [
+  { key: "contacted",     label: "Contacted" },
+  { key: "replied",       label: "Replied" },
+  { key: "call_booked",   label: "Call Booked" },
+  { key: "proposal_sent", label: "Proposal Sent" },
+];
+
+// Advance-to mapping (only stages that can advance)
+const ADVANCE_TO: Record<string, string> = {
+  not_started:   "contacted",
+  contacted:     "replied",
+  replied:       "call_booked",
+  call_booked:   "proposal_sent",
+};
+
+const ADVANCE_LABEL: Record<string, string> = {
+  not_started:   "Contacted",
+  contacted:     "Replied",
+  replied:       "Call Booked",
+  call_booked:   "Proposal Sent",
+};
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Contact {
   _id: string;
@@ -15,72 +104,43 @@ interface Contact {
   keyPoints: string;
   status: string;
   pipelineStage: string;
-  currentStage: number;
   engagementScore: number;
-  nextSendAt: string | null;
-  createdAt: string;
+  campaignId?: string;
 }
 
 interface EmailLog {
   _id: string;
   stage: 1 | 2 | 3;
-  status: string;
+  status: "draft" | "approved" | "sent";
   subject: string;
+  body: string;
   sentAt: string | null;
   openCount: number;
   clickCount: number;
   replied: boolean;
   repliedAt: string | null;
+  replyBody?: string | null;
+  replySnippet?: string | null;
 }
 
-const PIPELINE_STAGES = [
-  "not_started",
-  "contacted",
-  "replied",
-  "call_booked",
-  "proposal_sent",
-  "won",
-  "lost",
-] as const;
-
-const PIPELINE_LABELS: Record<string, string> = {
-  not_started: "Not started",
-  contacted: "Contacted",
-  replied: "Replied",
-  call_booked: "Call booked",
-  proposal_sent: "Proposal sent",
-  won: "Won",
-  lost: "Lost",
-};
-
-const LEAD_SOURCE_LABELS: Record<string, string> = {
-  cold_email: "Cold email",
-  referral: "Referral",
-  event_connection: "Event connection",
-  other: "Other",
-};
-
-const EDITABLE_STATUSES = ["active", "paused"];
-
-function formatDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+interface Campaign {
+  _id: string;
+  name: string;
 }
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: T | null; error: string | null }> {
+// ── API helper ────────────────────────────────────────────────────────────────
+
+async function apiFetch<T>(
+  url: string,
+  options?: RequestInit
+): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { data: null, error: body.error ?? `HTTP ${res.status}` };
     }
     return { data: (await res.json()) as T, error: null };
@@ -89,215 +149,844 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<{ data: 
   }
 }
 
-// ---- Page ----
+// ── Thread builder ────────────────────────────────────────────────────────────
+
+type ThreadItem =
+  | { kind: "outbound"; log: EmailLog; sortDate: number }
+  | { kind: "inbound";  log: EmailLog; sortDate: number }
+  | { kind: "pending";  log: EmailLog };
+
+type DatedItem = Extract<ThreadItem, { sortDate: number }>;
+
+function buildThread(logs: EmailLog[]): ThreadItem[] {
+  const dated: DatedItem[]    = [];
+  const pending: ThreadItem[] = [];
+
+  for (const log of logs) {
+    if (log.status === "sent") {
+      const sentTime = log.sentAt ? new Date(log.sentAt).getTime() : 0;
+      dated.push({ kind: "outbound", log, sortDate: sentTime });
+      if (log.replied) {
+        const repliedTime = log.repliedAt ? new Date(log.repliedAt).getTime() : 0;
+        dated.push({ kind: "inbound", log, sortDate: repliedTime });
+      }
+    } else {
+      pending.push({ kind: "pending", log });
+    }
+  }
+
+  // Newest dated items first
+  dated.sort((a, b) => b.sortDate - a.sortDate);
+
+  // Pending: highest stage first
+  pending.sort((a, b) => b.log.stage - a.log.stage);
+
+  return [...dated, ...pending];
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ContactDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
 
-  const [contact, setContact] = useState<Contact | null>(null);
-  const [logs, setLogs] = useState<EmailLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [contact,   setContact]   = useState<Contact | null>(null);
+  const [logs,      setLogs]      = useState<EmailLog[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
 
-  // Editable state
+  // Key points editing
   const [keyPoints, setKeyPoints] = useState("");
-  const [savingKeyPoints, setSavingKeyPoints] = useState(false);
-  const [savingPipeline, setSavingPipeline] = useState(false);
-  const [savingStatus, setSavingStatus] = useState(false);
+  const [kpSaving,  setKpSaving]  = useState(false);
+  const [kpMsg,     setKpMsg]     = useState<string | null>(null);
+
+  // Generic patch (pipeline / status)
+  const [saving,   setSaving]   = useState(false);
+  const [patchMsg, setPatchMsg] = useState<string | null>(null);
+
+  // Breadcrumb hover
+  const [dashHovered, setDashHovered] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [contactRes, logsRes] = await Promise.all([
+    const [contactRes, logsRes, campaignsRes] = await Promise.all([
       apiFetch<Contact>(`/api/contacts/${id}`),
       apiFetch<EmailLog[]>(`/api/email-logs?contactId=${id}`),
+      apiFetch<Campaign[]>("/api/campaigns"),
     ]);
-    if (contactRes.error) { setError(contactRes.error); setLoading(false); return; }
+    if (contactRes.error) {
+      setError(contactRes.error);
+      setLoading(false);
+      return;
+    }
     if (contactRes.data) {
       setContact(contactRes.data);
-      setKeyPoints(contactRes.data.keyPoints);
+      setKeyPoints(contactRes.data.keyPoints ?? "");
     }
-    if (logsRes.data) {
-      setLogs([...logsRes.data].sort((a, b) => a.stage - b.stage));
-    }
+    if (logsRes.data)      setLogs(logsRes.data);
+    if (campaignsRes.data) setCampaigns(campaignsRes.data);
     setLoading(false);
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
 
   async function patchContact(fields: Record<string, unknown>) {
+    setSaving(true);
     const { data, error } = await apiFetch<Contact>(`/api/contacts/${id}`, {
       method: "PATCH",
       body: JSON.stringify(fields),
     });
-    if (error) { setSaveMsg(`Error: ${error}`); return; }
-    if (data) { setContact(data); setKeyPoints(data.keyPoints); }
-    setSaveMsg("Saved.");
-    setTimeout(() => setSaveMsg(null), 2000);
-  }
-
-  async function handlePipelineChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    setSavingPipeline(true);
-    await patchContact({ pipelineStage: e.target.value });
-    setSavingPipeline(false);
-  }
-
-  async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    setSavingStatus(true);
-    await patchContact({ status: e.target.value });
-    setSavingStatus(false);
+    setSaving(false);
+    if (error) { setPatchMsg(`Error: ${error}`); return; }
+    if (data)  { setContact(data); }
+    setPatchMsg("Saved.");
+    setTimeout(() => setPatchMsg(null), 2000);
   }
 
   async function handleSaveKeyPoints() {
-    setSavingKeyPoints(true);
-    await patchContact({ keyPoints });
-    setSavingKeyPoints(false);
+    setKpSaving(true);
+    const { data, error } = await apiFetch<Contact>(`/api/contacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ keyPoints }),
+    });
+    setKpSaving(false);
+    if (error) { setKpMsg(`Error: ${error}`); return; }
+    if (data)  { setContact(data); }
+    setKpMsg("Saved.");
+    setTimeout(() => setKpMsg(null), 2000);
   }
 
-  if (loading) return <main className="p-6 text-gray-500">Loading&hellip;</main>;
-  if (error) return <main className="p-6 text-red-600">Error: {error}</main>;
-  if (!contact) return <main className="p-6 text-gray-500">Not found.</main>;
+  // ── Loading / error / not-found states ────────────────────────────────────
 
-  const canEditStatus = EDITABLE_STATUSES.includes(contact.status);
+  if (loading) {
+    return (
+      <div style={{ padding: "22px 30px", textAlign: "center", paddingTop: 60 }}>
+        <MonoLabel style={{ color: FAINT, fontSize: 11, letterSpacing: "0.14em" }}>
+          LOADING…
+        </MonoLabel>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: "22px 30px" }}>
+        <Panel style={{ padding: "16px 20px" }}>
+          <MonoLabel style={{ color: CLAY }}>{error}</MonoLabel>
+        </Panel>
+      </div>
+    );
+  }
+
+  if (!contact) {
+    return (
+      <div style={{ padding: "22px 30px", textAlign: "center", paddingTop: 60 }}>
+        <MonoLabel style={{ color: FAINT, fontSize: 11, letterSpacing: "0.14em" }}>
+          CONTACT NOT FOUND
+        </MonoLabel>
+      </div>
+    );
+  }
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+
+  const score       = contact.engagementScore ?? 0;
+  const isHot       = score >= HOT_THRESHOLD;
+  const campaignName = campaigns.find((c) => c._id === contact.campaignId)?.name ?? "";
+  const isWonOrLost  = contact.pipelineStage === "won" || contact.pipelineStage === "lost";
+  const currentOrder = PIPELINE_ORDER[contact.pipelineStage] ?? 0;
+  const advanceTo    = ADVANCE_TO[contact.pipelineStage];
+  const advanceLabel = ADVANCE_LABEL[contact.pipelineStage];
+
+  // Meta line: only non-empty segments
+  const metaParts: string[] = [];
+  if (contact.contactName) metaParts.push(contact.contactName.toUpperCase());
+  metaParts.push(contact.contactEmail.toUpperCase());
+  if (contact.leadSource)  metaParts.push(LEAD_SOURCE_MAP[contact.leadSource] ?? contact.leadSource.toUpperCase());
+  if (campaignName)         metaParts.push(campaignName.toUpperCase());
+
+  // Contact first name for inbound captions
+  const contactFirstName = contact.contactName
+    ? contact.contactName.split(" ")[0].toUpperCase()
+    : contact.contactEmail.split("@")[0].toUpperCase();
+
+  const thread = buildThread(logs);
+
+  const keyPointsDirty = keyPoints !== (contact.keyPoints ?? "");
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-8">
-      {/* Back link */}
-      <button
-        onClick={() => router.push("/")}
-        className="text-sm text-gray-500 hover:text-gray-800"
-      >
-        &larr; Back to contacts
-      </button>
+    <div style={{ padding: "22px 30px 40px" }}>
 
-      {/* Header */}
-      <section className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{contact.businessName}</h1>
-            {contact.contactName && (
-              <p className="text-gray-600 mt-0.5">{contact.contactName}</p>
-            )}
-            <p className="text-gray-500 text-sm mt-1">{contact.contactEmail}</p>
-          </div>
-          <div className="text-right space-y-1">
-            <div>
-              <span className="text-xs text-gray-500 mr-1">Score</span>
-              <span className={
-                contact.engagementScore >= 5
-                  ? "font-bold text-orange-600"
-                  : "font-medium text-gray-800"
-              }>
-                {contact.engagementScore}
-              </span>
-            </div>
-            <div>
-              <span className="text-xs text-gray-500 mr-1">Lead source</span>
-              <span className="text-sm text-gray-700">
-                {LEAD_SOURCE_LABELS[contact.leadSource] ?? contact.leadSource}
-              </span>
-            </div>
-            <StatusBadge value={contact.status} />
-          </div>
-        </div>
-      </section>
-
-      {/* Controls */}
-      <section className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-        <h2 className="font-semibold text-gray-800">Pipeline controls</h2>
-
-        {saveMsg && (
-          <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-1.5">
-            {saveMsg}
-          </p>
-        )}
-
-        <div className="flex flex-wrap gap-6 items-end">
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-600">Pipeline stage</label>
-            <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-              value={contact.pipelineStage}
-              onChange={handlePipelineChange}
-              disabled={savingPipeline}
-            >
-              {PIPELINE_STAGES.map((s) => (
-                <option key={s} value={s}>{PIPELINE_LABELS[s]}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-600">Status</label>
-            {canEditStatus ? (
-              <select
-                className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                value={contact.status}
-                onChange={handleStatusChange}
-                disabled={savingStatus}
-              >
-                <option value="active">active</option>
-                <option value="paused">paused</option>
-              </select>
-            ) : (
-              <div className="py-1">
-                <StatusBadge value={contact.status} />
-                <p className="text-xs text-gray-400 mt-1">System-set &mdash; read only</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Key points */}
-      <section className="bg-white border border-gray-200 rounded-lg p-6 space-y-3">
-        <h2 className="font-semibold text-gray-800">Key points</h2>
-        <textarea
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y"
-          rows={5}
-          value={keyPoints}
-          onChange={(e) => setKeyPoints(e.target.value)}
-        />
-        <button
-          onClick={handleSaveKeyPoints}
-          disabled={savingKeyPoints || keyPoints === contact.keyPoints}
-          className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 transition-colors"
+      {/* ── 1. BREADCRUMB ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <Link
+          href="/"
+          onMouseEnter={() => setDashHovered(true)}
+          onMouseLeave={() => setDashHovered(false)}
+          style={{
+            fontFamily: mono,
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            color: dashHovered ? INK : FAINT,
+            textDecoration: "none",
+            transition: "color 0.1s",
+          }}
         >
-          {savingKeyPoints ? "Saving…" : "Save key points"}
-        </button>
-      </section>
+          DASHBOARD
+        </Link>
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 10,
+            color: FAINT,
+            letterSpacing: "0.1em",
+          }}
+        >
+          /
+        </span>
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            color: INK,
+          }}
+        >
+          {contact.businessName}
+        </span>
+      </div>
 
-      {/* Email log timeline */}
-      <section className="space-y-3">
-        <h2 className="font-semibold text-gray-800">Email timeline</h2>
-        {logs.length === 0 && (
-          <p className="text-gray-400 text-sm">No email logs yet.</p>
-        )}
-        {logs.map((log) => (
-          <div key={log._id} className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="text-xs text-gray-500 font-medium mr-2">Stage {log.stage}</span>
-                <StatusBadge value={log.status} />
-                <p className="text-sm font-medium text-gray-800 mt-1">{log.subject}</p>
+      {/* ── 2. BODY (flex row) ── */}
+      <div
+        style={{
+          display: "flex",
+          gap: 16,
+          alignItems: "flex-start",
+          marginTop: 12,
+        }}
+      >
+
+        {/* ── LEFT COLUMN ── */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+
+          {/* ── HEADER PANEL ── */}
+          <Panel style={{ padding: "16px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+
+              {/* Initials tile */}
+              <InitialsTile name={contact.businessName} size={48} />
+
+              {/* Middle */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Line 1: serif name + HOT · {score} chip */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: serif,
+                      fontSize: 26,
+                      fontWeight: 400,
+                      color: INK,
+                      letterSpacing: "-0.01em",
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    {contact.businessName}
+                  </span>
+                  {isHot && (
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        border: "1px solid #D8B45E",
+                        color: "#8A6212",
+                        backgroundColor: "#F3E9CE",
+                        borderRadius: 4,
+                        padding: "1px 6px",
+                        lineHeight: 1.6,
+                        flexShrink: 0,
+                      }}
+                    >
+                      HOT · {score}
+                    </span>
+                  )}
+                </div>
+
+                {/* Line 2: mono meta */}
+                <div
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 9.5,
+                    color: FAINT2,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    marginTop: 5,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {metaParts.join(" · ")}
+                </div>
               </div>
-              <div className="text-right text-xs text-gray-500 shrink-0">
-                <div>Sent: {formatDate(log.sentAt)}</div>
-                {log.replied && (
-                  <div className="text-blue-600">Replied: {formatDate(log.repliedAt)}</div>
+
+              {/* Right: Pause/Resume button or status label */}
+              <div style={{ flexShrink: 0 }}>
+                {contact.status === "active" && (
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => patchContact({ status: "paused" })}
+                  >
+                    Pause
+                  </Button>
+                )}
+                {contact.status === "paused" && (
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => patchContact({ status: "active" })}
+                  >
+                    Resume
+                  </Button>
+                )}
+                {contact.status !== "active" && contact.status !== "paused" && (
+                  <MonoLabel
+                    style={{
+                      fontSize: 10,
+                      letterSpacing: "0.08em",
+                      color:
+                        contact.status === "unsubscribed" ||
+                        contact.status === "bounced"
+                          ? CLAY
+                          : FAINT,
+                    }}
+                  >
+                    {contact.status.toUpperCase()}
+                  </MonoLabel>
                 )}
               </div>
             </div>
-            <div className="flex gap-4 mt-2 text-xs text-gray-500">
-              <span>Opens: {log.openCount}</span>
-              <span>Clicks: {log.clickCount}</span>
-              {log.replied && <span className="text-blue-600 font-medium">Replied ✓</span>}
-            </div>
+          </Panel>
+
+          {/* ── CONVERSATION THREAD ── */}
+          <div
+            style={{
+              marginTop: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            {thread.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0" }}>
+                <MonoLabel
+                  style={{
+                    color: FAINT,
+                    fontSize: 10,
+                    letterSpacing: "0.1em",
+                  }}
+                >
+                  NO EMAILS YET · SEQUENCE STARTS ON THE NEXT RUN
+                </MonoLabel>
+              </div>
+            )}
+
+            {thread.map((item, idx) => {
+
+              /* ── INBOUND bubble ── */
+              if (item.kind === "inbound") {
+                const log  = item.log;
+                const text = log.replyBody ?? log.replySnippet ?? null;
+                return (
+                  <div key={`inbound-${log._id}-${idx}`} style={{ maxWidth: "64%" }}>
+                    <div
+                      style={{
+                        backgroundColor: "#F3EFE3",
+                        border: "1px solid #DDD1B8",
+                        borderRadius: "12px 12px 12px 3px",
+                        padding: "12px 16px",
+                      }}
+                    >
+                      {text ? (
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontSize: 13.5,
+                            color: "#2A251C",
+                            lineHeight: 1.6,
+                            whiteSpace: "pre-wrap",
+                            display: "block",
+                          }}
+                        >
+                          {text}
+                        </span>
+                      ) : (
+                        <MonoLabel
+                          style={{
+                            color: FAINT,
+                            fontSize: 9.5,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          REPLIED — OPEN GMAIL FOR THE MESSAGE
+                        </MonoLabel>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9,
+                        color: FAINT2,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        marginTop: 5,
+                      }}
+                    >
+                      {contactFirstName} · REPLIED {fmtDateTime(log.repliedAt)}
+                    </div>
+                  </div>
+                );
+              }
+
+              /* ── OUTBOUND bubble ── */
+              if (item.kind === "outbound") {
+                const log     = item.log;
+                const body    = log.body ?? "";
+                const preview = body.slice(0, 140);
+                return (
+                  <div
+                    key={`outbound-${log._id}-${idx}`}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-end",
+                    }}
+                  >
+                    <div
+                      style={{
+                        backgroundColor: "#161310",
+                        borderRadius: "12px 12px 3px 12px",
+                        padding: "12px 16px",
+                        maxWidth: "64%",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: grotesk,
+                          fontWeight: 600,
+                          fontSize: 13.5,
+                          color: "#F4EEDF",
+                        }}
+                      >
+                        {log.subject}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: grotesk,
+                          fontSize: 13,
+                          color: "#CFC6B4",
+                          lineHeight: 1.55,
+                          marginTop: 4,
+                        }}
+                      >
+                        {preview}
+                        {body.length > 140 ? "…" : ""}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9,
+                        color: FAINT2,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        marginTop: 5,
+                      }}
+                    >
+                      SENT {fmtShortDate(log.sentAt)} · OPEN {log.openCount}× · CLICK {log.clickCount}×
+                    </div>
+                  </div>
+                );
+              }
+
+              /* ── PENDING row ── */
+              if (item.kind === "pending") {
+                const log   = item.log;
+                const label =
+                  log.status === "approved"
+                    ? "APPROVED · QUEUED"
+                    : "DRAFT PENDING REVIEW";
+                return (
+                  <div
+                    key={`pending-${log._id}-${idx}`}
+                    style={{ display: "flex", justifyContent: "flex-end" }}
+                  >
+                    <Link href="/review" style={{ textDecoration: "none" }}>
+                      <span
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 9.5,
+                          color: FAINT2,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          border: "1px solid #D8CFBB",
+                          borderRadius: 5,
+                          padding: "4px 10px",
+                          display: "inline-block",
+                        }}
+                      >
+                        {ordinal(log.stage)} TOUCH · {label}
+                      </span>
+                    </Link>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
           </div>
-        ))}
-      </section>
-    </main>
+        </div>
+
+        {/* ── RIGHT RAIL ── */}
+        <div
+          style={{
+            width: 288,
+            flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+
+          {/* ── PIPELINE PANEL ── */}
+          <Panel style={{ padding: "16px 18px" }}>
+            <MonoLabel
+              style={{ fontSize: 10, letterSpacing: "0.14em", color: FAINT }}
+            >
+              PIPELINE
+            </MonoLabel>
+
+            {/* Patch message */}
+            {patchMsg && (
+              <div style={{ marginTop: 8 }}>
+                <MonoLabel
+                  style={{
+                    fontSize: 9.5,
+                    color: patchMsg.startsWith("Error") ? CLAY : "#5A7D5A",
+                  }}
+                >
+                  {patchMsg}
+                </MonoLabel>
+              </div>
+            )}
+
+            {/* Checklist rows */}
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              {CHECKLIST_ROWS.map((row) => {
+                const rowOrder    = PIPELINE_ORDER[row.key] ?? 0;
+                const isCompleted = rowOrder < currentOrder;
+                const isCurrent   = rowOrder === currentOrder;
+                const isUpcoming  = rowOrder > currentOrder;
+                const rowColor    = PIPELINE_META[row.key]?.color ?? "#A99E86";
+
+                return (
+                  <div
+                    key={row.key}
+                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  >
+                    {/* Circle */}
+                    <div
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        backgroundColor: isCompleted
+                          ? FOREST
+                          : isCurrent
+                          ? rowColor
+                          : "transparent",
+                        border: isUpcoming ? "1.5px solid #C9BEA6" : "none",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isCompleted && (
+                        <Check size={11} color="#FFFFFF" strokeWidth={2.5} />
+                      )}
+                    </div>
+
+                    {/* Label */}
+                    <span
+                      style={{
+                        fontFamily: grotesk,
+                        fontSize: 13,
+                        color: isCompleted ? INK : isCurrent ? rowColor : "#8E836C",
+                        fontWeight: isCurrent ? 600 : 400,
+                      }}
+                    >
+                      {row.label}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {/* Won / Lost row */}
+              {(() => {
+                if (contact.pipelineStage === "won") {
+                  // CURRENT at order 5 → filled green, label "Won"
+                  const wonColor = PIPELINE_META.won?.color ?? FOREST;
+                  return (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <div
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: "50%",
+                          backgroundColor: wonColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontFamily: grotesk,
+                          fontSize: 13,
+                          color: wonColor,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Won
+                      </span>
+                    </div>
+                  );
+                }
+                if (contact.pipelineStage === "lost") {
+                  // CURRENT at order 5 → filled brick, label "Lost"
+                  const lostColor = PIPELINE_META.lost?.color ?? "#A23B28";
+                  return (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <div
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: "50%",
+                          backgroundColor: lostColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontFamily: grotesk,
+                          fontSize: 13,
+                          color: lostColor,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Lost
+                      </span>
+                    </div>
+                  );
+                }
+                // UPCOMING → empty ring, "Won / Lost"
+                return (
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  >
+                    <div
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        border: "1.5px solid #C9BEA6",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontFamily: grotesk,
+                        fontSize: 13,
+                        color: "#8E836C",
+                      }}
+                    >
+                      Won / Lost
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Advance + Won/Lost buttons */}
+            <div
+              style={{
+                marginTop: 14,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              {/* Advance button — hidden when proposal_sent/won/lost */}
+              {advanceTo && (
+                <Button
+                  variant="primary"
+                  disabled={saving}
+                  style={{ width: "100%" }}
+                  onClick={() => patchContact({ pipelineStage: advanceTo })}
+                >
+                  Advance → {advanceLabel}
+                </Button>
+              )}
+
+              {/* Won / Lost split row — hidden when already won/lost */}
+              {!isWonOrLost && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    disabled={saving}
+                    onClick={() => patchContact({ pipelineStage: "won" })}
+                    style={{
+                      flex: 1,
+                      fontFamily: grotesk,
+                      fontSize: 13.5,
+                      fontWeight: 500,
+                      color: FOREST,
+                      border: "1px solid #B5CBB5",
+                      backgroundColor: "transparent",
+                      borderRadius: 7,
+                      padding: "8px 14px",
+                      cursor: "pointer",
+                      transition: "background-color 0.1s",
+                    }}
+                  >
+                    Won
+                  </button>
+                  <button
+                    disabled={saving}
+                    onClick={() => patchContact({ pipelineStage: "lost" })}
+                    style={{
+                      flex: 1,
+                      fontFamily: grotesk,
+                      fontSize: 13.5,
+                      fontWeight: 500,
+                      color: "#A23B28",
+                      border: "1px solid #D3C0B4",
+                      backgroundColor: "transparent",
+                      borderRadius: 7,
+                      padding: "8px 14px",
+                      cursor: "pointer",
+                      transition: "background-color 0.1s",
+                    }}
+                  >
+                    Lost
+                  </button>
+                </div>
+              )}
+
+              {/* Closed label — shown when won/lost */}
+              {isWonOrLost && (
+                <div style={{ textAlign: "center" }}>
+                  <MonoLabel
+                    style={{
+                      fontSize: 10,
+                      letterSpacing: "0.08em",
+                      color:
+                        contact.pipelineStage === "won" ? FOREST : "#A23B28",
+                    }}
+                  >
+                    CLOSED · {contact.pipelineStage.toUpperCase()}
+                  </MonoLabel>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          {/* ── KEY POINTS PANEL ── */}
+          <Panel style={{ padding: "16px 18px" }}>
+            <MonoLabel
+              style={{ fontSize: 10, letterSpacing: "0.14em", color: FAINT }}
+            >
+              KEY POINTS
+            </MonoLabel>
+
+            <textarea
+              value={keyPoints}
+              onChange={(e) => setKeyPoints(e.target.value)}
+              style={{
+                fontFamily: grotesk,
+                fontSize: 13,
+                color: "#2A251C",
+                lineHeight: 1.6,
+                backgroundColor: "transparent",
+                border: "none",
+                outline: "none",
+                width: "100%",
+                minHeight: 110,
+                resize: "vertical",
+                marginTop: 10,
+                padding: 0,
+                boxSizing: "border-box",
+              }}
+            />
+
+            {/* Save button + message */}
+            {keyPointsDirty && (
+              <div
+                style={{
+                  marginTop: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <Button
+                  variant="primary"
+                  disabled={kpSaving}
+                  onClick={handleSaveKeyPoints}
+                >
+                  {kpSaving ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            )}
+
+            {kpMsg && (
+              <div style={{ marginTop: 6 }}>
+                <MonoLabel
+                  style={{
+                    fontSize: 9.5,
+                    color: kpMsg.startsWith("Error") ? CLAY : "#5A7D5A",
+                  }}
+                >
+                  {kpMsg}
+                </MonoLabel>
+              </div>
+            )}
+          </Panel>
+
+        </div>
+      </div>
+    </div>
   );
 }
