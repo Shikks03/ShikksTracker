@@ -16,6 +16,8 @@ export interface IEmailLog extends Document {
   body: string;
   gmailThreadId: string | null;
   gmailMessageId: string | null;
+  /** RFC-2822 Message-ID header (e.g. <CAF…@mail.gmail.com>). Required for Gmail threading via In-Reply-To/References. Fetched post-send via users.messages.get metadata. */
+  rfcMessageId: string | null;
   sentAt: Date | null;
   trackingPixelId: string | null;
   openCount: number;
@@ -48,6 +50,7 @@ const EmailLogSchema = new Schema<IEmailLog>({
   body: { type: String, required: true },
   gmailThreadId: { type: String, default: null },
   gmailMessageId: { type: String, default: null },
+  rfcMessageId: { type: String, default: null },
   sentAt: { type: Date, default: null },
   trackingPixelId: { type: String, default: null },
   openCount: { type: Number, default: 0 },
@@ -66,6 +69,8 @@ EmailLogSchema.index({ campaignId: 1 });
 EmailLogSchema.index({ "links.trackingId": 1 }, { sparse: true });
 // Queue queries (review gate)
 EmailLogSchema.index({ status: 1 });
+// Daily-cap query: count sent logs within a Manila-day window
+EmailLogSchema.index({ status: 1, sentAt: 1 });
 // Pixel lookups
 EmailLogSchema.index({ trackingPixelId: 1 }, { sparse: true });
 
