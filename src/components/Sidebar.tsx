@@ -45,12 +45,12 @@ export default function Sidebar() {
   return (
     <aside
       style={{
-        width: 238,
-        minWidth: 238,
-        maxWidth: 238,
+        width: 268,
+        minWidth: 268,
+        maxWidth: 268,
         height: "100vh",
         backgroundColor: "#161310",
-        padding: "22px 16px",
+        padding: "28px 20px",
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
@@ -63,7 +63,7 @@ export default function Sidebar() {
           style={{
             fontFamily: serif,
             fontStyle: "italic",
-            fontSize: 24,
+            fontSize: 28,
             color: "#F4EEDF",
             lineHeight: 1.15,
           }}
@@ -73,11 +73,11 @@ export default function Sidebar() {
         <div
           style={{
             fontFamily: mono,
-            fontSize: 9.5,
+            fontSize: 10.5,
             letterSpacing: "0.28em",
             color: "#8B8371",
             textTransform: "uppercase",
-            marginTop: 5,
+            marginTop: 7,
           }}
         >
           TRACKER · OUTREACH OS
@@ -87,14 +87,14 @@ export default function Sidebar() {
           style={{
             height: 1,
             backgroundColor: "#2E2A22",
-            marginTop: 18,
-            marginBottom: 18,
+            marginTop: 24,
+            marginBottom: 24,
           }}
         />
       </div>
 
       {/* ── Navigation ───────────────────────────────── */}
-      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <nav style={{ display: "flex", flexDirection: "column", gap: 3 }}>
         {NAV_ITEMS.map(({ index, label, href, showBadge }) => {
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -106,8 +106,8 @@ export default function Sidebar() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "8px 10px",
+                gap: 10,
+                padding: "12px 14px",
                 borderRadius: 6,
                 textDecoration: "none",
                 backgroundColor: active ? "#F4EEDF" : "transparent",
@@ -123,7 +123,7 @@ export default function Sidebar() {
               <span
                 style={{
                   fontFamily: mono,
-                  fontSize: 10,
+                  fontSize: 11,
                   color: "#6E6653",
                   flexShrink: 0,
                   lineHeight: 1,
@@ -136,7 +136,7 @@ export default function Sidebar() {
               <span
                 style={{
                   fontFamily: grotesk,
-                  fontSize: 13.5,
+                  fontSize: 15,
                   flex: 1,
                   lineHeight: 1.2,
                 }}
@@ -151,10 +151,10 @@ export default function Sidebar() {
                     backgroundColor: "#C68A1E",
                     color: "#221B08",
                     fontFamily: mono,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 700,
                     borderRadius: 4,
-                    padding: "1px 6px",
+                    padding: "2px 8px",
                     lineHeight: 1.6,
                     flexShrink: 0,
                   }}
@@ -174,7 +174,7 @@ export default function Sidebar() {
           style={{
             height: 1,
             backgroundColor: "#2E2A22",
-            marginBottom: 14,
+            marginBottom: 20,
           }}
         />
 
@@ -182,11 +182,11 @@ export default function Sidebar() {
         <div
           style={{
             fontFamily: mono,
-            fontSize: 9.5,
+            fontSize: 10.5,
             letterSpacing: "0.20em",
             textTransform: "uppercase",
             color: "#6E6653",
-            marginBottom: 5,
+            marginBottom: 7,
           }}
         >
           NEXT SEND
@@ -196,10 +196,10 @@ export default function Sidebar() {
         <div
           style={{
             fontFamily: mono,
-            fontSize: 15,
+            fontSize: 17,
             fontWeight: 600,
             color: "#F4EEDF",
-            marginBottom: 16,
+            marginBottom: 22,
             letterSpacing: "0.04em",
           }}
         >
@@ -207,12 +207,12 @@ export default function Sidebar() {
         </div>
 
         {/* User chip */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Avatar tile */}
           <div
             style={{
-              width: 28,
-              height: 28,
+              width: 32,
+              height: 32,
               borderRadius: 6,
               backgroundColor: "#3A342A",
               display: "flex",
@@ -224,7 +224,7 @@ export default function Sidebar() {
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
                 color: "#E8C877",
                 lineHeight: 1,
@@ -238,7 +238,7 @@ export default function Sidebar() {
           <span
             style={{
               fontFamily: grotesk,
-              fontSize: 13,
+              fontSize: 14.5,
               color: "#CFC6B4",
             }}
           >
