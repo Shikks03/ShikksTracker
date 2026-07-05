@@ -15,6 +15,14 @@ import React from "react";
 const mono    = "var(--font-jetbrains)";
 const grotesk = "var(--font-familjen)";
 
+/** Soft warm-tinted shadow for panels/cards only — never rows or chips. */
+export const panelShadow =
+  "0 1px 2px rgba(26,23,18,0.04), 0 2px 6px rgba(26,23,18,0.05)";
+
+/** Standard interactive transition. */
+export const uiTransition =
+  "background-color 130ms ease, border-color 130ms ease, box-shadow 130ms ease, color 130ms ease";
+
 /* ─────────────────────────────────────────────────────────────────── */
 /* MonoLabel                                                            */
 /* ─────────────────────────────────────────────────────────────────── */
@@ -35,7 +43,7 @@ export function MonoLabel({ children, className = "", style }: MonoLabelProps) {
       className={className}
       style={{
         fontFamily: mono,
-        fontSize: 10,
+        fontSize: 11,
         textTransform: "uppercase",
         letterSpacing: "0.08em",
         color: "#8E836C",
@@ -64,6 +72,7 @@ export function Panel({ children, className = "", style, ...rest }: PanelProps) 
         backgroundColor: "#F8F5EC",
         border: "1px solid #D3C9B4",
         borderRadius: 10,
+        boxShadow: panelShadow,
         ...style,
       }}
       {...rest}
@@ -98,7 +107,7 @@ function getInitials(name: string): string {
  */
 export function InitialsTile({
   name,
-  size = 34,
+  size = 40,
   className = "",
   style,
 }: InitialsTileProps) {
@@ -108,7 +117,7 @@ export function InitialsTile({
       style={{
         width: size,
         height: size,
-        borderRadius: 6,
+        borderRadius: 7,
         backgroundColor: "#ECE5D2",
         border: "1px solid #DCD2BC",
         display: "flex",
@@ -121,7 +130,7 @@ export function InitialsTile({
       <span
         style={{
           fontFamily: mono,
-          fontSize: 11,
+          fontSize: 12.5,
           fontWeight: 600,
           color: "#5A5344",
           textTransform: "uppercase",
@@ -147,14 +156,14 @@ export function HotChip({ className = "" }: { className?: string }) {
       className={className}
       style={{
         fontFamily: mono,
-        fontSize: 9.5,
+        fontSize: 10.5,
         textTransform: "uppercase",
         letterSpacing: "0.08em",
         border: "1px solid #D8B45E",
         color: "#8A6212",
         backgroundColor: "#F3E9CE",
         borderRadius: 4,
-        padding: "1px 5px",
+        padding: "2px 7px",
         lineHeight: 1.6,
         flexShrink: 0,
       }}
@@ -194,12 +203,12 @@ export function PipelineMarker({ stage, className = "" }: PipelineMarkerProps) {
   return (
     <span
       className={className}
-      style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
     >
       <span
         style={{
-          width: 7,
-          height: 7,
+          width: 8,
+          height: 8,
           borderRadius: 1,
           backgroundColor: color,
           flexShrink: 0,
@@ -208,7 +217,7 @@ export function PipelineMarker({ stage, className = "" }: PipelineMarkerProps) {
       <span
         style={{
           fontFamily: grotesk,
-          fontSize: 12.5,
+          fontSize: 14,
           color: "#1A1712",
           whiteSpace: "nowrap",
         }}
@@ -242,12 +251,12 @@ export function SectionHeader({
   return (
     <div
       className={className}
-      style={{ display: "flex", alignItems: "center", gap: 8 }}
+      style={{ display: "flex", alignItems: "center", gap: 10 }}
     >
       <span
         style={{
           fontFamily: mono,
-          fontSize: 10.5,
+          fontSize: 11.5,
           textTransform: "uppercase",
           letterSpacing: "0.14em",
           color: accent ?? "#8E836C",
@@ -262,11 +271,11 @@ export function SectionHeader({
         <span
           style={{
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             border: "1px solid #D8CFBB",
             backgroundColor: "#F8F5EC",
             borderRadius: 4,
-            padding: "1px 5px",
+            padding: "2px 7px",
             color: "#8E836C",
             flexShrink: 0,
           }}
@@ -321,7 +330,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-[7px] text-[13.5px] px-[14px] py-[8px] transition-colors duration-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
+    "inline-flex items-center justify-center gap-1.5 rounded-[7px] text-[14.5px] px-[18px] py-[10px] transition-colors duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <button
@@ -344,11 +353,11 @@ export function Button({
  * Usage: `<input className={inputClass} ... />`
  */
 export const inputClass =
-  "w-full bg-[#FCFAF3] border border-[#D3C9B4] rounded-[7px] font-sans text-[13.5px] text-[#1A1712] px-[11px] py-[8px] focus:border-[#A99E86] outline-none placeholder:text-[#A2957A] transition-colors duration-100";
+  "w-full bg-[#FCFAF3] border border-[#D3C9B4] rounded-[7px] font-sans text-[15px] text-[#1A1712] px-[14px] py-[10px] focus:border-[#A99E86] outline-none placeholder:text-[#A2957A] transition-colors duration-150";
 
 /**
  * Tailwind class string for mono uppercase inputs (e.g. email filter).
  * Usage: `<input className={monoInputClass} ... />`
  */
 export const monoInputClass =
-  "w-full bg-[#FCFAF3] border border-[#D3C9B4] rounded-[7px] font-mono text-[11px] uppercase tracking-[0.08em] text-[#1A1712] px-[11px] py-[8px] focus:border-[#A99E86] outline-none placeholder:text-[#A2957A] transition-colors duration-100";
+  "w-full bg-[#FCFAF3] border border-[#D3C9B4] rounded-[7px] font-mono text-[12px] uppercase tracking-[0.08em] text-[#1A1712] px-[14px] py-[10px] focus:border-[#A99E86] outline-none placeholder:text-[#A2957A] transition-colors duration-150";
