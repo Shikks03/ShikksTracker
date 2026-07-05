@@ -54,3 +54,28 @@ body {
   background-color: #242018 !important;
   color: #E0D8C8 !important;
 }
+
+/* ── Comfortable density pass: motion + hover ─────────────── */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* One gentle entrance per page — applied to each page's outermost content wrapper. */
+.page-enter {
+  animation: fade-up 200ms ease-out;
+}
+
+/* Row hover tint — inline styles win on base state, so hover needs a class.
+   Do not apply to rows with a non-default background (e.g. HOT amber). */
+.row-hover {
+  transition: background-color 130ms ease;
+}
+.row-hover:hover {
+  background-color: #F1EBDD !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter { animation: none; }
+}
