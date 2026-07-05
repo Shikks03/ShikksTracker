@@ -121,7 +121,7 @@ export default function SuppressionsPage() {
   }
 
   return (
-    <div style={{ padding: "24px 30px 40px" }}>
+    <div className="page-enter" style={{ padding: "34px 42px 56px" }}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -129,12 +129,12 @@ export default function SuppressionsPage() {
           <span
             style={{
               fontFamily: mono,
-              fontSize: 10,
+              fontSize: 11,
               textTransform: "uppercase",
               letterSpacing: "0.14em",
               color: FAINT,
               display: "block",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             DO-NOT-CONTACT · PH DATA PRIVACY ACT
@@ -142,7 +142,7 @@ export default function SuppressionsPage() {
           <h1
             style={{
               fontFamily: serif,
-              fontSize: 34,
+              fontSize: 40,
               fontWeight: 400,
               color: INK,
               letterSpacing: "-0.01em",
@@ -155,7 +155,7 @@ export default function SuppressionsPage() {
         </div>
 
         {/* Search */}
-        <div style={{ position: "relative", width: 220, marginTop: 4, flexShrink: 0 }}>
+        <div style={{ position: "relative", width: 220, marginTop: 6, flexShrink: 0 }}>
           <Search
             size={13}
             color={FAINT2}
@@ -178,13 +178,13 @@ export default function SuppressionsPage() {
       </div>
 
       {/* Add row */}
-      <div style={{ marginTop: 18 }}>
-        <Panel style={{ padding: "12px 14px" }}>
-          <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <div style={{ marginTop: 24 }}>
+        <Panel style={{ padding: "16px 20px" }}>
+          <form onSubmit={handleAdd} style={{ display: "flex", gap: 14, alignItems: "center" }}>
             <input
               type="email"
               className={inputClass}
-              style={{ flex: 1, fontFamily: mono, fontSize: 12 }}
+              style={{ flex: 1, fontFamily: mono, fontSize: 13 }}
               placeholder="email@to-block.ph"
               value={addEmail}
               onChange={(e) => setAddEmail(e.target.value)}
@@ -205,11 +205,11 @@ export default function SuppressionsPage() {
             </Button>
           </form>
           {addError && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 10 }}>
               <span
                 style={{
                   fontFamily: mono,
-                  fontSize: 9.5,
+                  fontSize: 10.5,
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
                   color: CLAY,
@@ -223,28 +223,28 @@ export default function SuppressionsPage() {
       </div>
 
       {/* Table */}
-      <div style={{ marginTop: 14 }}>
+      <div style={{ marginTop: 18 }}>
         {loading && (
           <span
             style={{
               fontFamily: mono,
-              fontSize: 9.5,
+              fontSize: 10.5,
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               color: FAINT,
               display: "block",
-              padding: "20px 0",
+              padding: "28px 0",
             }}
           >
             LOADING…
           </span>
         )}
         {!loading && error && (
-          <Panel style={{ padding: "16px 20px" }}>
+          <Panel style={{ padding: "22px 28px" }}>
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 color: CLAY,
                 textTransform: "uppercase",
               }}
@@ -260,7 +260,7 @@ export default function SuppressionsPage() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "1.6fr 1fr 1fr 90px",
-                padding: "10px 16px",
+                padding: "14px 22px",
                 borderBottom: "1px solid #E4DBC8",
               }}
             >
@@ -269,7 +269,7 @@ export default function SuppressionsPage() {
                   key={i}
                   style={{
                     fontFamily: mono,
-                    fontSize: 9,
+                    fontSize: 10,
                     textTransform: "uppercase",
                     letterSpacing: "0.12em",
                     color: FAINT,
@@ -283,11 +283,11 @@ export default function SuppressionsPage() {
 
             {/* Empty state */}
             {suppressions.length === 0 && (
-              <div style={{ padding: "20px 16px", textAlign: "center" }}>
+              <div style={{ padding: "28px 22px", textAlign: "center" }}>
                 <span
                   style={{
                     fontFamily: mono,
-                    fontSize: 9.5,
+                    fontSize: 10.5,
                     textTransform: "uppercase",
                     letterSpacing: "0.08em",
                     color: FAINT,
@@ -308,7 +308,7 @@ export default function SuppressionsPage() {
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1.6fr 1fr 1fr 90px",
-                      padding: "11px 16px",
+                      padding: "16px 22px",
                       alignItems: "center",
                     }}
                   >
@@ -316,7 +316,7 @@ export default function SuppressionsPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 11.5,
+                        fontSize: 12.5,
                         color: INK,
                       }}
                     >
@@ -328,9 +328,9 @@ export default function SuppressionsPage() {
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 5,
+                        gap: 7,
                         fontFamily: mono,
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         textTransform: "uppercase",
                         letterSpacing: "0.04em",
                         color: meta.textColor,
@@ -352,7 +352,7 @@ export default function SuppressionsPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 10,
+                        fontSize: 11,
                         color: FAINT2,
                       }}
                     >
@@ -375,13 +375,13 @@ export default function SuppressionsPage() {
               style={{
                 borderTop: "1px solid #E4DBC8",
                 backgroundColor: "#F1EBDD",
-                padding: "9px 16px",
+                padding: "12px 22px",
               }}
             >
               <span
                 style={{
                   fontFamily: mono,
-                  fontSize: 9,
+                  fontSize: 10,
                   textTransform: "uppercase",
                   letterSpacing: "0.1em",
                   color: FAINT,
@@ -409,7 +409,7 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
       onMouseLeave={() => setHovered(false)}
       style={{
         fontFamily: "var(--font-familjen)",
-        fontSize: 12,
+        fontSize: 13,
         color: hovered ? "#A23B28" : "#8E836C",
         textDecoration: hovered ? "underline" : "none",
         background: "none",
