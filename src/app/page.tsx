@@ -13,6 +13,7 @@ import {
   PipelineMarker,
   SectionHeader,
   monoInputClass,
+  panelShadow,
 } from "@/components/ui";
 import { useNextSendCountdown } from "@/components/useNextSendCountdown";
 
@@ -153,14 +154,15 @@ function ContactRowItem({
 
   return (
     <div
+      className={isHot ? undefined : "row-hover"}
       onClick={() => onNavigate(c._id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 12,
-        padding: "13px 16px",
+        gap: 16,
+        padding: "18px 22px",
         cursor: "pointer",
         backgroundColor: rowBg,
         boxShadow: isHot ? "inset 4px 0 0 #C68A1E" : undefined,
@@ -168,16 +170,16 @@ function ContactRowItem({
       }}
     >
       {/* Initials tile */}
-      <InitialsTile name={c.businessName} size={34} />
+      <InitialsTile name={c.businessName} />
 
       {/* Main column */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span
             style={{
               fontFamily: grotesk,
               fontWeight: 600,
-              fontSize: 14,
+              fontSize: 16,
               color: INK,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -191,11 +193,11 @@ function ContactRowItem({
         <div
           style={{
             fontFamily: mono,
-            fontSize: 9.5,
+            fontSize: 10.5,
             color: FAINT2,
             textTransform: "uppercase",
             letterSpacing: "0.06em",
-            marginTop: 2,
+            marginTop: 3,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -206,14 +208,14 @@ function ContactRowItem({
       </div>
 
       {/* Right cluster */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexShrink: 0 }}>
         <PipelineMarker stage={c.pipelineStage} />
 
         {group === "in_sequence" && c.lastLogStage != null && (
           <span
             style={{
               fontFamily: mono,
-              fontSize: 10,
+              fontSize: 11,
               textTransform: "uppercase",
               letterSpacing: "0.06em",
               color: c.lastLogStatus === "sent" ? GREEN_SENT : FAINT2,
@@ -227,7 +229,7 @@ function ContactRowItem({
         <span
           style={{
             fontFamily: mono,
-            fontSize: 15,
+            fontSize: 17,
             fontWeight: 700,
             width: 26,
             textAlign: "right",
@@ -368,13 +370,13 @@ export default function Dashboard() {
   // Styled select (chip appearance)
   const selectStyle: React.CSSProperties = {
     fontFamily: mono,
-    fontSize: 10,
+    fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     border: "1px solid #D3C9B4",
     backgroundColor: "transparent",
     borderRadius: 6,
-    padding: "5px 24px 5px 10px",
+    padding: "7px 34px 7px 14px",
     color: INK,
     cursor: "pointer",
     appearance: "none",
@@ -382,7 +384,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={{ padding: "24px 30px 40px", minHeight: "100%" }}>
+    <div className="page-enter" style={{ padding: "34px 42px 56px", minHeight: "100%" }}>
 
       {/* ── 1. HEADER ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -390,11 +392,11 @@ export default function Dashboard() {
         <div>
           <MonoLabel
             style={{
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: "0.14em",
               color: FAINT,
               display: "block",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             {kickerDate} · {repliedGroup.length} REPLIED / {draftCount} DRAFTS
@@ -402,7 +404,7 @@ export default function Dashboard() {
           <h1
             style={{
               fontFamily: serif,
-              fontSize: 40,
+              fontSize: 46,
               fontWeight: 400,
               color: INK,
               letterSpacing: "-0.01em",
@@ -415,7 +417,7 @@ export default function Dashboard() {
         </div>
 
         {/* Right: search input */}
-        <div style={{ position: "relative", width: 200, marginTop: 4, flexShrink: 0 }}>
+        <div style={{ position: "relative", width: 200, marginTop: 6, flexShrink: 0 }}>
           <Search
             size={13}
             color={FAINT2}
@@ -438,7 +440,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── 2. PRIORITY PANELS ── */}
-      <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 28 }}>
         {/* Replies panel */}
         <div
           role="button"
@@ -453,17 +455,18 @@ export default function Dashboard() {
             border: "1px solid #D3C9B4",
             borderLeft: `3px solid ${CLAY}`,
             borderRadius: 10,
-            padding: "14px 16px",
+            padding: "20px 22px",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            gap: 14,
+            gap: 18,
+            boxShadow: panelShadow,
           }}
         >
           <span
             style={{
               fontFamily: serif,
-              fontSize: 38,
+              fontSize: 44,
               fontWeight: 400,
               color: INK,
               lineHeight: 1,
@@ -477,7 +480,7 @@ export default function Dashboard() {
               style={{
                 fontFamily: grotesk,
                 fontWeight: 600,
-                fontSize: 14,
+                fontSize: 16,
                 color: INK,
                 lineHeight: 1.2,
               }}
@@ -491,7 +494,7 @@ export default function Dashboard() {
           <span
             style={{
               fontFamily: mono,
-              fontSize: 10,
+              fontSize: 11,
               color: CLAY,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
@@ -511,19 +514,20 @@ export default function Dashboard() {
             border: "1px solid #D3C9B4",
             borderLeft: `3px solid ${AMBER}`,
             borderRadius: 10,
-            padding: "14px 16px",
+            padding: "20px 22px",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            gap: 14,
+            gap: 18,
             textDecoration: "none",
             color: "inherit",
+            boxShadow: panelShadow,
           }}
         >
           <span
             style={{
               fontFamily: serif,
-              fontSize: 38,
+              fontSize: 44,
               fontWeight: 400,
               color: INK,
               lineHeight: 1,
@@ -537,7 +541,7 @@ export default function Dashboard() {
               style={{
                 fontFamily: grotesk,
                 fontWeight: 600,
-                fontSize: 14,
+                fontSize: 16,
                 color: INK,
                 lineHeight: 1.2,
               }}
@@ -551,7 +555,7 @@ export default function Dashboard() {
           <span
             style={{
               fontFamily: mono,
-              fontSize: 10,
+              fontSize: 11,
               color: AMBER_TEXT,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
@@ -568,8 +572,8 @@ export default function Dashboard() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          marginTop: 18,
+          gap: 10,
+          marginTop: 24,
           flexWrap: "wrap",
         }}
       >
@@ -589,7 +593,7 @@ export default function Dashboard() {
               </option>
             ))}
           </select>
-          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 9 }}>
             ▾
           </span>
         </div>
@@ -608,7 +612,7 @@ export default function Dashboard() {
               </option>
             ))}
           </select>
-          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 9 }}>
             ▾
           </span>
         </div>
@@ -626,7 +630,7 @@ export default function Dashboard() {
             <option value="event_connection">EVENT</option>
             <option value="other">OTHER</option>
           </select>
-          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 8 }}>
+          <span style={{ position: "absolute", right: 8, pointerEvents: "none", color: FAINT, fontSize: 9 }}>
             ▾
           </span>
         </div>
@@ -636,18 +640,18 @@ export default function Dashboard() {
           onClick={() => setHotOnly((v) => !v)}
           style={{
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             textTransform: "uppercase",
             letterSpacing: "0.08em",
             border: "1px solid #D8B45E",
             backgroundColor: hotOnly ? "#F3E9CE" : "transparent",
             borderRadius: 6,
-            padding: "5px 10px",
+            padding: "7px 14px",
             color: HOT_TEXT,
             cursor: "pointer",
             display: "inline-flex",
             alignItems: "center",
-            gap: 5,
+            gap: 7,
           }}
         >
           <span
@@ -668,7 +672,7 @@ export default function Dashboard() {
           style={{
             marginLeft: "auto",
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             textTransform: "uppercase",
             letterSpacing: "0.08em",
             background: "none",
@@ -683,7 +687,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── 4. CONTACT GROUPS ── */}
-      <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 26 }}>
+      <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 36 }}>
 
         {/* Loading state */}
         {loading && (
@@ -691,7 +695,7 @@ export default function Dashboard() {
             style={{
               display: "block",
               textAlign: "center",
-              padding: "40px 0",
+              padding: "56px 0",
               color: FAINT,
             }}
           >
@@ -701,7 +705,7 @@ export default function Dashboard() {
 
         {/* Error state */}
         {!loading && error && (
-          <Panel style={{ padding: "16px 20px" }}>
+          <Panel style={{ padding: "22px 28px" }}>
             <MonoLabel style={{ color: CLAY }}>{error}</MonoLabel>
           </Panel>
         )}
@@ -712,7 +716,7 @@ export default function Dashboard() {
             style={{
               display: "block",
               textAlign: "center",
-              padding: "40px 0",
+              padding: "56px 0",
               color: FAINT,
             }}
           >
@@ -730,7 +734,7 @@ export default function Dashboard() {
                   count={repliedGroup.length}
                   accent={CLAY}
                 />
-                <div style={{ marginTop: 10 }}>
+                <div style={{ marginTop: 14 }}>
                   <GroupPanel rows={repliedGroup} group="replied" onNavigate={navigate} />
                 </div>
               </div>
@@ -740,7 +744,7 @@ export default function Dashboard() {
             {inSequenceGroup.length > 0 && (
               <div>
                 <SectionHeader title="IN SEQUENCE" count={inSequenceGroup.length} />
-                <div style={{ marginTop: 10 }}>
+                <div style={{ marginTop: 14 }}>
                   <GroupPanel rows={inSequenceGroup} group="in_sequence" onNavigate={navigate} />
                 </div>
               </div>
@@ -750,7 +754,7 @@ export default function Dashboard() {
             {closedGroup.length > 0 && (
               <div>
                 <SectionHeader title="CLOSED" count={closedGroup.length} />
-                <div style={{ marginTop: 10 }}>
+                <div style={{ marginTop: 14 }}>
                   <GroupPanel rows={closedGroup} group="closed" onNavigate={navigate} />
                 </div>
               </div>
