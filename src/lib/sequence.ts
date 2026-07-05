@@ -228,6 +228,163 @@ async function generateDrafts(): Promise<DraftsResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Exported: send a single approved EmailLog
+// ---------------------------------------------------------------------------
+
+export interface SendOneLogResult {
+  status: "sent" | "skipped" | "failed";
+  contactName: string;
+  subject: string;
+  error?: string;
+}
+
+/**
+ * Sends one approved EmailLog. Handles threading, tracking, Gmail send,
+ * post-send EmailLog/Contact updates. Called by both the sequence engine
+ * and the manual send-batch API.
+ *
+ * Reverts the log to "draft" if the contact is inactive or the campaign
+ * is missing, so it doesn't linger in the approved queue.
+ */
+export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
+  try {
+    // Load contact
+    const contact = await Contact.findById(log.contactId).lean() as IContact | null;
+    if (!contact || contact.status !== "active") {
+      await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+      return {
+        status: "skipped",
+        contactName: contact?.businessName ?? "unknown",
+        subject: log.subject,
+        error: "contact not active — reverted to draft",
+      };
+    }
+
+    // Load campaign (needed for sequenceSpacingDays)
+    const campaign = await Campaign.findById(log.campaignId).lean() as ICampaign | null;
+    if (!campaign) {
+      await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+      return {
+        status: "skipped",
+        contactName: contact.businessName,
+        subject: log.subject,
+        error: "campaign not found — reverted to draft",
+      };
+    }
+
+    // Threading for stages 2–3
+    let threadId: string | undefined;
+    let inReplyTo: string | undefined;
+    let references: string | undefined;
+    let subjectToSend = log.subject;
+
+    if (log.stage > 1) {
+      const prevLog = await EmailLog.findOne({
+        contactId: contact._id,
+        stage: { $lt: log.stage },
+        status: "sent",
+      })
+        .sort({ stage: -1 })
+        .lean();
+
+      if (prevLog) {
+        if (prevLog.gmailThreadId) threadId = prevLog.gmailThreadId;
+        if (prevLog.rfcMessageId) inReplyTo = prevLog.rfcMessageId;
+
+        // Build References oldest-first (RFC 5322): stage-1 first, then prevLog
+        let stage1RfcMessageId: string | null | undefined;
+        if (log.stage === 3) {
+          const stage1Log = await EmailLog.findOne({
+            contactId: contact._id,
+            stage: 1,
+            status: "sent",
+          }).lean();
+          stage1RfcMessageId = stage1Log?.rfcMessageId;
+        }
+        const refParts = [stage1RfcMessageId, prevLog.rfcMessageId];
+        const uniqueRefs = [...new Set(refParts.filter(Boolean))];
+        if (uniqueRefs.length) references = uniqueRefs.join(" ");
+
+        subjectToSend = prevLog.subject.startsWith("Re:")
+          ? prevLog.subject
+          : `Re: ${prevLog.subject}`;
+
+        log.subject = subjectToSend;
+        await EmailLog.findByIdAndUpdate(log._id, { subject: subjectToSend });
+      }
+    }
+
+    // Tracking IDs (not persisted until post-send update so failed sends retry cleanly)
+    const trackingPixelId = randomUUID();
+    const { links } = extractAndRewriteLinks(log.body);
+    const htmlBody = renderTrackedHtml(log.body, links, trackingPixelId);
+
+    // Send
+    const { messageId, threadId: returnedThreadId } = await sendGmailMessage({
+      to: contact.contactEmail,
+      subject: subjectToSend,
+      htmlBody,
+      threadId,
+      inReplyTo,
+      references,
+    });
+
+    const sentAt = new Date();
+    const rfcMessageId = await fetchRfcMessageId(messageId);
+
+    // Update EmailLog
+    await EmailLog.findByIdAndUpdate(log._id, {
+      status: "sent",
+      sentAt,
+      gmailMessageId: messageId,
+      gmailThreadId: returnedThreadId,
+      rfcMessageId,
+      trackingPixelId,
+      links,
+    });
+
+    // Update Contact
+    const contactUpdate: Record<string, unknown> = {
+      currentStage: log.stage,
+    };
+    if (log.stage === 1 && contact.pipelineStage === "not_started") {
+      contactUpdate.pipelineStage = "contacted";
+    }
+
+    let firstSentAt: Date;
+    if (log.stage === 1) {
+      firstSentAt = sentAt;
+    } else {
+      const stage1Log = await EmailLog.findOne({
+        contactId: contact._id,
+        stage: 1,
+        status: "sent",
+      })
+        .select({ sentAt: 1 })
+        .lean();
+      firstSentAt = stage1Log?.sentAt ?? sentAt;
+    }
+
+    if (log.stage < 3) {
+      contactUpdate.nextSendAt = computeNextSendAt(
+        firstSentAt,
+        campaign.sequenceSpacingDays,
+        (log.stage + 1) as 2 | 3
+      );
+    } else {
+      contactUpdate.nextSendAt = null;
+    }
+
+    await Contact.findByIdAndUpdate(contact._id, contactUpdate);
+
+    return { status: "sent", contactName: contact.businessName, subject: subjectToSend };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: "failed", contactName: "unknown", subject: log.subject, error: msg };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Phase C: sendApproved
 // ---------------------------------------------------------------------------
 
@@ -241,13 +398,11 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
   const result: SendsResult = { sent: 0, skipped: [], errors: [] };
   const now = new Date();
 
-  // Guard: send window
   if (!isWithinSendWindow(now)) {
     result.skipped.push("outside send window");
     return result;
   }
 
-  // Guard: daily cap
   const dayStart = getManilaDayStart(now);
   const sentToday = await EmailLog.countDocuments({
     status: "sent",
@@ -262,163 +417,26 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
   const batchLimit = Math.min(remaining, SENDS_PER_RUN);
 
   const approvedLogs = await EmailLog.find({ status: "approved" })
-    .sort({ _id: 1 }) // oldest first
+    .sort({ _id: 1 })
     .limit(batchLimit);
 
   for (let i = 0; i < approvedLogs.length; i++) {
     const log = approvedLogs[i];
 
-    // Time-budget check
     if (Date.now() - runStartMs > RUN_TIME_BUDGET_MS) {
       result.skipped.push(`time budget exceeded — ${approvedLogs.length - i} log(s) deferred`);
       break;
     }
 
-    try {
-      // Load contact
-      const contact = await Contact.findById(log.contactId).lean() as IContact | null;
-
-      if (!contact || contact.status !== "active") {
-        await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
-        result.skipped.push(`log ${String(log._id)}: contact not active — reverted to draft`);
-        continue;
-      }
-
-      // Load campaign (needed for sequenceSpacingDays)
-      const campaign = await Campaign.findById(log.campaignId).lean() as ICampaign | null;
-      if (!campaign) {
-        await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
-        result.skipped.push(`log ${String(log._id)}: campaign not found — reverted to draft`);
-        continue;
-      }
-
-      // Threading for stages 2–3
-      let threadId: string | undefined;
-      let inReplyTo: string | undefined;
-      let references: string | undefined;
-      let subjectToSend = log.subject;
-
-      if (log.stage > 1) {
-        // Find most recent sent log with stage < this stage
-        const prevLog = await EmailLog.findOne({
-          contactId: contact._id,
-          stage: { $lt: log.stage },
-          status: "sent",
-        })
-          .sort({ stage: -1 })
-          .lean();
-
-        if (prevLog) {
-          if (prevLog.gmailThreadId) threadId = prevLog.gmailThreadId;
-          if (prevLog.rfcMessageId) inReplyTo = prevLog.rfcMessageId;
-
-          // Build References oldest-first (RFC 5322): stage-1 first, then prevLog
-          let stage1RfcMessageId: string | null | undefined;
-          if (log.stage === 3) {
-            const stage1Log = await EmailLog.findOne({
-              contactId: contact._id,
-              stage: 1,
-              status: "sent",
-            }).lean();
-            stage1RfcMessageId = stage1Log?.rfcMessageId;
-          }
-          const refParts = [stage1RfcMessageId, prevLog.rfcMessageId];
-          const uniqueRefs = [...new Set(refParts.filter(Boolean))];
-          if (uniqueRefs.length) references = uniqueRefs.join(" ");
-
-          // Subject override: keep Gmail threading reliable
-          const prevSubject = prevLog.subject;
-          if (!prevSubject.startsWith("Re:")) {
-            subjectToSend = `Re: ${prevSubject}`;
-          } else {
-            subjectToSend = prevSubject;
-          }
-
-          // Persist the actual subject that will be sent
-          log.subject = subjectToSend;
-          await EmailLog.findByIdAndUpdate(log._id, { subject: subjectToSend });
-        }
-      }
-
-      // Phase 7+8: generate tracking ids locally (not persisted until post-send
-      // update so a failed send retries cleanly with fresh ids next run).
-      const trackingPixelId = randomUUID();
-      const { links } = extractAndRewriteLinks(log.body);
-      const htmlBody = renderTrackedHtml(log.body, links, trackingPixelId);
-
-      // Send
-      const { messageId, threadId: returnedThreadId } = await sendGmailMessage({
-        to: contact.contactEmail,
-        subject: subjectToSend,
-        htmlBody,
-        threadId,
-        inReplyTo,
-        references,
-      });
-
-      const sentAt = new Date();
-
-      // Fetch RFC Message-ID (best-effort; failure doesn't block the send record)
-      const rfcMessageId = await fetchRfcMessageId(messageId);
-
-      // Update log — include tracking ids in the same atomic update as status "sent"
-      await EmailLog.findByIdAndUpdate(log._id, {
-        status: "sent",
-        sentAt,
-        gmailMessageId: messageId,
-        gmailThreadId: returnedThreadId,
-        rfcMessageId,
-        trackingPixelId,
-        links,
-      });
-
-      // Update contact
-      const contactUpdate: Record<string, unknown> = {
-        currentStage: log.stage,
-      };
-
-      if (log.stage === 1 && contact.pipelineStage === "not_started") {
-        contactUpdate.pipelineStage = "contacted";
-      }
-
-      // Determine firstSentAt for spacing computation
-      let firstSentAt: Date;
-      if (log.stage === 1) {
-        // This IS the first send
-        firstSentAt = sentAt;
-      } else {
-        // Retrieve stage-1 sent log's sentAt
-        const stage1Log = await EmailLog.findOne({
-          contactId: contact._id,
-          stage: 1,
-          status: "sent",
-        })
-          .select({ sentAt: 1 })
-          .lean();
-        firstSentAt = stage1Log?.sentAt ?? sentAt;
-      }
-
-      if (log.stage < 3) {
-        contactUpdate.nextSendAt = computeNextSendAt(
-          firstSentAt,
-          campaign.sequenceSpacingDays,
-          (log.stage + 1) as 2 | 3
-        );
-      } else {
-        // Sequence complete
-        contactUpdate.nextSendAt = null;
-      }
-
-      await Contact.findByIdAndUpdate(contact._id, contactUpdate);
-
+    const logResult = await sendOneLog(log);
+    if (logResult.status === "sent") {
       result.sent++;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`log ${String(log._id)}: ${msg}`);
-      // Leave log status "approved" so it retries next run
+    } else if (logResult.status === "skipped") {
+      result.skipped.push(`log ${String(log._id)}: ${logResult.error ?? "skipped"}`);
+    } else {
+      result.errors.push(`log ${String(log._id)}: ${logResult.error ?? "failed"}`);
     }
 
-    // Delay between sends (skip after the last one)
     if (i < approvedLogs.length - 1) {
       await sleep(randomDelayMs(SEND_DELAY_MIN_MS, SEND_DELAY_MAX_MS));
     }
