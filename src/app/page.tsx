@@ -423,7 +423,7 @@ export default function Dashboard() {
             color={FAINT2}
             style={{
               position: "absolute",
-              left: 10,
+              left: 14,
               top: "50%",
               transform: "translateY(-50%)",
               pointerEvents: "none",
@@ -431,7 +431,7 @@ export default function Dashboard() {
           />
           <input
             className={monoInputClass}
-            style={{ paddingLeft: 30 }}
+            style={{ paddingLeft: 36 }}
             placeholder="SEARCH…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

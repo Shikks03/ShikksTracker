@@ -161,7 +161,7 @@ export default function SuppressionsPage() {
             color={FAINT2}
             style={{
               position: "absolute",
-              left: 10,
+              left: 14,
               top: "50%",
               transform: "translateY(-50%)",
               pointerEvents: "none",
@@ -169,7 +169,7 @@ export default function SuppressionsPage() {
           />
           <input
             className={monoInputClass}
-            style={{ paddingLeft: 30 }}
+            style={{ paddingLeft: 36 }}
             placeholder="FILTER BY EMAIL…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
