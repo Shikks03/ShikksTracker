@@ -261,8 +261,8 @@ export default function ContactDetailPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: "22px 30px", textAlign: "center", paddingTop: 60 }}>
-        <MonoLabel style={{ color: FAINT, fontSize: 11, letterSpacing: "0.14em" }}>
+      <div style={{ padding: "30px 40px", textAlign: "center", paddingTop: 84 }}>
+        <MonoLabel style={{ color: FAINT, fontSize: 12, letterSpacing: "0.14em" }}>
           LOADING…
         </MonoLabel>
       </div>
@@ -271,8 +271,8 @@ export default function ContactDetailPage() {
 
   if (error) {
     return (
-      <div style={{ padding: "22px 30px" }}>
-        <Panel style={{ padding: "16px 20px" }}>
+      <div style={{ padding: "30px 40px" }}>
+        <Panel style={{ padding: "22px 28px" }}>
           <MonoLabel style={{ color: CLAY }}>{error}</MonoLabel>
         </Panel>
       </div>
@@ -281,8 +281,8 @@ export default function ContactDetailPage() {
 
   if (!contact) {
     return (
-      <div style={{ padding: "22px 30px", textAlign: "center", paddingTop: 60 }}>
-        <MonoLabel style={{ color: FAINT, fontSize: 11, letterSpacing: "0.14em" }}>
+      <div style={{ padding: "30px 40px", textAlign: "center", paddingTop: 84 }}>
+        <MonoLabel style={{ color: FAINT, fontSize: 12, letterSpacing: "0.14em" }}>
           CONTACT NOT FOUND
         </MonoLabel>
       </div>
@@ -316,17 +316,17 @@ export default function ContactDetailPage() {
   const keyPointsDirty = keyPoints !== (contact.keyPoints ?? "");
 
   return (
-    <div style={{ padding: "22px 30px 40px" }}>
+    <div className="page-enter" style={{ padding: "30px 40px 56px" }}>
 
       {/* ── 1. BREADCRUMB ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Link
           href="/"
           onMouseEnter={() => setDashHovered(true)}
           onMouseLeave={() => setDashHovered(false)}
           style={{
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             textTransform: "uppercase",
             letterSpacing: "0.1em",
             color: dashHovered ? INK : FAINT,
@@ -339,7 +339,7 @@ export default function ContactDetailPage() {
         <span
           style={{
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             color: FAINT,
             letterSpacing: "0.1em",
           }}
@@ -349,7 +349,7 @@ export default function ContactDetailPage() {
         <span
           style={{
             fontFamily: mono,
-            fontSize: 10,
+            fontSize: 11,
             textTransform: "uppercase",
             letterSpacing: "0.1em",
             color: INK,
@@ -363,9 +363,9 @@ export default function ContactDetailPage() {
       <div
         style={{
           display: "flex",
-          gap: 16,
+          gap: 22,
           alignItems: "flex-start",
-          marginTop: 12,
+          marginTop: 16,
         }}
       >
 
@@ -373,11 +373,11 @@ export default function ContactDetailPage() {
         <div style={{ flex: 1, minWidth: 0 }}>
 
           {/* ── HEADER PANEL ── */}
-          <Panel style={{ padding: "16px 20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <Panel style={{ padding: "22px 28px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
 
               {/* Initials tile */}
-              <InitialsTile name={contact.businessName} size={48} />
+              <InitialsTile name={contact.businessName} size={56} />
 
               {/* Middle */}
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -386,14 +386,14 @@ export default function ContactDetailPage() {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 10,
                     flexWrap: "wrap",
                   }}
                 >
                   <span
                     style={{
                       fontFamily: serif,
-                      fontSize: 26,
+                      fontSize: 30,
                       fontWeight: 400,
                       color: INK,
                       letterSpacing: "-0.01em",
@@ -406,14 +406,14 @@ export default function ContactDetailPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         textTransform: "uppercase",
                         letterSpacing: "0.06em",
                         border: "1px solid #D8B45E",
                         color: "#8A6212",
                         backgroundColor: "#F3E9CE",
                         borderRadius: 4,
-                        padding: "1px 6px",
+                        padding: "2px 8px",
                         lineHeight: 1.6,
                         flexShrink: 0,
                       }}
@@ -427,11 +427,11 @@ export default function ContactDetailPage() {
                 <div
                   style={{
                     fontFamily: mono,
-                    fontSize: 9.5,
+                    fontSize: 10.5,
                     color: FAINT2,
                     textTransform: "uppercase",
                     letterSpacing: "0.06em",
-                    marginTop: 5,
+                    marginTop: 7,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -464,7 +464,7 @@ export default function ContactDetailPage() {
                 {contact.status !== "active" && contact.status !== "paused" && (
                   <MonoLabel
                     style={{
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: "0.08em",
                       color:
                         contact.status === "unsubscribed" ||
@@ -483,18 +483,18 @@ export default function ContactDetailPage() {
           {/* ── CONVERSATION THREAD ── */}
           <div
             style={{
-              marginTop: 16,
+              marginTop: 22,
               display: "flex",
               flexDirection: "column",
-              gap: 14,
+              gap: 18,
             }}
           >
             {thread.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0" }}>
+              <div style={{ textAlign: "center", padding: "56px 0" }}>
                 <MonoLabel
                   style={{
                     color: FAINT,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: "0.1em",
                   }}
                 >
@@ -516,14 +516,14 @@ export default function ContactDetailPage() {
                         backgroundColor: "#F3EFE3",
                         border: "1px solid #DDD1B8",
                         borderRadius: "12px 12px 12px 3px",
-                        padding: "12px 16px",
+                        padding: "16px 22px",
                       }}
                     >
                       {text ? (
                         <span
                           style={{
                             fontFamily: grotesk,
-                            fontSize: 13.5,
+                            fontSize: 15.5,
                             color: "#2A251C",
                             lineHeight: 1.6,
                             whiteSpace: "pre-wrap",
@@ -536,7 +536,7 @@ export default function ContactDetailPage() {
                         <MonoLabel
                           style={{
                             color: FAINT,
-                            fontSize: 9.5,
+                            fontSize: 10.5,
                             textTransform: "uppercase",
                             letterSpacing: "0.06em",
                           }}
@@ -548,11 +548,11 @@ export default function ContactDetailPage() {
                     <div
                       style={{
                         fontFamily: mono,
-                        fontSize: 9,
+                        fontSize: 10,
                         color: FAINT2,
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
-                        marginTop: 5,
+                        marginTop: 7,
                       }}
                     >
                       {contactFirstName} · REPLIED {fmtDateTime(log.repliedAt)}
@@ -579,7 +579,7 @@ export default function ContactDetailPage() {
                       style={{
                         backgroundColor: "#161310",
                         borderRadius: "12px 12px 3px 12px",
-                        padding: "12px 16px",
+                        padding: "16px 22px",
                         maxWidth: "64%",
                       }}
                     >
@@ -587,7 +587,7 @@ export default function ContactDetailPage() {
                         style={{
                           fontFamily: grotesk,
                           fontWeight: 600,
-                          fontSize: 13.5,
+                          fontSize: 15.5,
                           color: "#F4EEDF",
                         }}
                       >
@@ -596,10 +596,10 @@ export default function ContactDetailPage() {
                       <div
                         style={{
                           fontFamily: grotesk,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           color: "#CFC6B4",
                           lineHeight: 1.55,
-                          marginTop: 4,
+                          marginTop: 6,
                         }}
                       >
                         {preview}
@@ -609,11 +609,11 @@ export default function ContactDetailPage() {
                     <div
                       style={{
                         fontFamily: mono,
-                        fontSize: 9,
+                        fontSize: 10,
                         color: FAINT2,
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
-                        marginTop: 5,
+                        marginTop: 7,
                       }}
                     >
                       SENT {fmtShortDate(log.sentAt)} · OPEN {log.openCount}× · CLICK {log.clickCount}×
@@ -638,13 +638,13 @@ export default function ContactDetailPage() {
                       <span
                         style={{
                           fontFamily: mono,
-                          fontSize: 9.5,
+                          fontSize: 10.5,
                           color: FAINT2,
                           textTransform: "uppercase",
                           letterSpacing: "0.06em",
                           border: "1px solid #D8CFBB",
                           borderRadius: 5,
-                          padding: "4px 10px",
+                          padding: "6px 14px",
                           display: "inline-block",
                         }}
                       >
@@ -667,24 +667,24 @@ export default function ContactDetailPage() {
             flexShrink: 0,
             display: "flex",
             flexDirection: "column",
-            gap: 16,
+            gap: 22,
           }}
         >
 
           {/* ── PIPELINE PANEL ── */}
-          <Panel style={{ padding: "16px 18px" }}>
+          <Panel style={{ padding: "22px 26px" }}>
             <MonoLabel
-              style={{ fontSize: 10, letterSpacing: "0.14em", color: FAINT }}
+              style={{ fontSize: 11, letterSpacing: "0.14em", color: FAINT }}
             >
               PIPELINE
             </MonoLabel>
 
             {/* Patch message */}
             {patchMsg && (
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 10 }}>
                 <MonoLabel
                   style={{
-                    fontSize: 9.5,
+                    fontSize: 10.5,
                     color: patchMsg.startsWith("Error") ? CLAY : "#5A7D5A",
                   }}
                 >
@@ -696,10 +696,10 @@ export default function ContactDetailPage() {
             {/* Checklist rows */}
             <div
               style={{
-                marginTop: 12,
+                marginTop: 16,
                 display: "flex",
                 flexDirection: "column",
-                gap: 10,
+                gap: 14,
               }}
             >
               {CHECKLIST_ROWS.map((row) => {
@@ -712,7 +712,7 @@ export default function ContactDetailPage() {
                 return (
                   <div
                     key={row.key}
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    style={{ display: "flex", alignItems: "center", gap: 14 }}
                   >
                     {/* Circle */}
                     <div
@@ -741,7 +741,7 @@ export default function ContactDetailPage() {
                     <span
                       style={{
                         fontFamily: grotesk,
-                        fontSize: 13,
+                        fontSize: 14.5,
                         color: isCompleted ? INK : isCurrent ? rowColor : "#8E836C",
                         fontWeight: isCurrent ? 600 : 400,
                       }}
@@ -759,7 +759,7 @@ export default function ContactDetailPage() {
                   const wonColor = PIPELINE_META.won?.color ?? FOREST;
                   return (
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                      style={{ display: "flex", alignItems: "center", gap: 14 }}
                     >
                       <div
                         style={{
@@ -773,7 +773,7 @@ export default function ContactDetailPage() {
                       <span
                         style={{
                           fontFamily: grotesk,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           color: wonColor,
                           fontWeight: 600,
                         }}
@@ -788,7 +788,7 @@ export default function ContactDetailPage() {
                   const lostColor = PIPELINE_META.lost?.color ?? "#A23B28";
                   return (
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                      style={{ display: "flex", alignItems: "center", gap: 14 }}
                     >
                       <div
                         style={{
@@ -802,7 +802,7 @@ export default function ContactDetailPage() {
                       <span
                         style={{
                           fontFamily: grotesk,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           color: lostColor,
                           fontWeight: 600,
                         }}
@@ -815,7 +815,7 @@ export default function ContactDetailPage() {
                 // UPCOMING → empty ring, "Won / Lost"
                 return (
                   <div
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    style={{ display: "flex", alignItems: "center", gap: 14 }}
                   >
                     <div
                       style={{
@@ -829,7 +829,7 @@ export default function ContactDetailPage() {
                     <span
                       style={{
                         fontFamily: grotesk,
-                        fontSize: 13,
+                        fontSize: 14.5,
                         color: "#8E836C",
                       }}
                     >
@@ -843,10 +843,10 @@ export default function ContactDetailPage() {
             {/* Advance + Won/Lost buttons */}
             <div
               style={{
-                marginTop: 14,
+                marginTop: 18,
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
+                gap: 10,
               }}
             >
               {/* Advance button — hidden when proposal_sent/won/lost */}
@@ -863,20 +863,20 @@ export default function ContactDetailPage() {
 
               {/* Won / Lost split row — hidden when already won/lost */}
               {!isWonOrLost && (
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 10 }}>
                   <button
                     disabled={saving}
                     onClick={() => patchContact({ pipelineStage: "won" })}
                     style={{
                       flex: 1,
                       fontFamily: grotesk,
-                      fontSize: 13.5,
+                      fontSize: 15.5,
                       fontWeight: 500,
                       color: FOREST,
                       border: "1px solid #B5CBB5",
                       backgroundColor: "transparent",
                       borderRadius: 7,
-                      padding: "8px 14px",
+                      padding: "12px 20px",
                       cursor: "pointer",
                       transition: "background-color 0.1s",
                     }}
@@ -889,13 +889,13 @@ export default function ContactDetailPage() {
                     style={{
                       flex: 1,
                       fontFamily: grotesk,
-                      fontSize: 13.5,
+                      fontSize: 15.5,
                       fontWeight: 500,
                       color: "#A23B28",
                       border: "1px solid #D3C0B4",
                       backgroundColor: "transparent",
                       borderRadius: 7,
-                      padding: "8px 14px",
+                      padding: "12px 20px",
                       cursor: "pointer",
                       transition: "background-color 0.1s",
                     }}
@@ -910,7 +910,7 @@ export default function ContactDetailPage() {
                 <div style={{ textAlign: "center" }}>
                   <MonoLabel
                     style={{
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: "0.08em",
                       color:
                         contact.pipelineStage === "won" ? FOREST : "#A23B28",
@@ -924,9 +924,9 @@ export default function ContactDetailPage() {
           </Panel>
 
           {/* ── KEY POINTS PANEL ── */}
-          <Panel style={{ padding: "16px 18px" }}>
+          <Panel style={{ padding: "22px 26px" }}>
             <MonoLabel
-              style={{ fontSize: 10, letterSpacing: "0.14em", color: FAINT }}
+              style={{ fontSize: 11, letterSpacing: "0.14em", color: FAINT }}
             >
               KEY POINTS
             </MonoLabel>
@@ -936,7 +936,7 @@ export default function ContactDetailPage() {
               onChange={(e) => setKeyPoints(e.target.value)}
               style={{
                 fontFamily: grotesk,
-                fontSize: 13,
+                fontSize: 14.5,
                 color: "#2A251C",
                 lineHeight: 1.6,
                 backgroundColor: "transparent",
@@ -945,7 +945,7 @@ export default function ContactDetailPage() {
                 width: "100%",
                 minHeight: 110,
                 resize: "vertical",
-                marginTop: 10,
+                marginTop: 14,
                 padding: 0,
                 boxSizing: "border-box",
               }}
@@ -955,10 +955,10 @@ export default function ContactDetailPage() {
             {keyPointsDirty && (
               <div
                 style={{
-                  marginTop: 8,
+                  marginTop: 10,
                   display: "flex",
                   alignItems: "center",
-                  gap: 10,
+                  gap: 14,
                 }}
               >
                 <Button
@@ -972,10 +972,10 @@ export default function ContactDetailPage() {
             )}
 
             {kpMsg && (
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 8 }}>
                 <MonoLabel
                   style={{
-                    fontSize: 9.5,
+                    fontSize: 10.5,
                     color: kpMsg.startsWith("Error") ? CLAY : "#5A7D5A",
                   }}
                 >
