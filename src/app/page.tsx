@@ -687,7 +687,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── 4. CONTACT GROUPS ── */}
-      <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 36 }}>
+      <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 36 }}>
 
         {/* Loading state */}
         {loading && (
