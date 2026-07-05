@@ -277,7 +277,7 @@ export default function ReviewPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ padding: "24px 30px 40px", minHeight: "100%" }}>
+    <div className="page-enter" style={{ padding: "34px 42px 56px", minHeight: "100%" }}>
 
       {/* ── 1. HEADER ── */}
       <div
@@ -291,11 +291,11 @@ export default function ReviewPage() {
         <div>
           <MonoLabel
             style={{
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: "0.14em",
               color: FAINT,
               display: "block",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             {drafts.length > 0
@@ -305,7 +305,7 @@ export default function ReviewPage() {
           <h1
             style={{
               fontFamily: serif,
-              fontSize: 34,
+              fontSize: 40,
               fontWeight: 400,
               color: INK,
               letterSpacing: "-0.01em",
@@ -322,9 +322,9 @@ export default function ReviewPage() {
           <div
             style={{
               display: "flex",
-              gap: 4,
+              gap: 6,
               width: 160,
-              marginTop: 14,
+              marginTop: 18,
               flexShrink: 0,
               alignItems: "center",
             }}
@@ -346,7 +346,7 @@ export default function ReviewPage() {
 
       {/* ── Global error ── */}
       {globalError && (
-        <Panel style={{ padding: "12px 16px", marginTop: 16 }}>
+        <Panel style={{ padding: "16px 22px", marginTop: 22 }}>
           <MonoLabel style={{ color: CLAY, textTransform: "uppercase" }}>
             {globalError}
           </MonoLabel>
@@ -359,7 +359,7 @@ export default function ReviewPage() {
         <div style={{ textAlign: "center", padding: "80px 0" }}>
           <MonoLabel
             style={{
-              fontSize: 11,
+              fontSize: 12,
               letterSpacing: "0.14em",
               color: FAINT,
               display: "block",
@@ -369,10 +369,10 @@ export default function ReviewPage() {
           </MonoLabel>
           <MonoLabel
             style={{
-              fontSize: 9.5,
+              fontSize: 10.5,
               color: FAINT2,
               display: "block",
-              marginTop: 8,
+              marginTop: 10,
             }}
           >
             THE SEQUENCE ENGINE GENERATES DRAFTS ON ITS NEXT RUN
@@ -382,8 +382,8 @@ export default function ReviewPage() {
         <div
           style={{
             display: "flex",
-            gap: 24,
-            marginTop: 20,
+            gap: 32,
+            marginTop: 28,
             alignItems: "flex-start",
           }}
         >
@@ -402,7 +402,7 @@ export default function ReviewPage() {
                 {/* Card header */}
                 <div
                   style={{
-                    padding: "16px 20px",
+                    padding: "22px 28px",
                     borderBottom: "1px solid #E4DBC8",
                   }}
                 >
@@ -412,13 +412,13 @@ export default function ReviewPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      gap: 12,
+                      gap: 16,
                     }}
                   >
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         color: FAINT2,
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
@@ -437,7 +437,7 @@ export default function ReviewPage() {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 6,
+                        gap: 8,
                         flexShrink: 0,
                       }}
                     >
@@ -445,11 +445,11 @@ export default function ReviewPage() {
                       <span
                         style={{
                           fontFamily: mono,
-                          fontSize: 9.5,
+                          fontSize: 10.5,
                           border: "1px solid #C9BEA6",
                           color: FAINT,
                           borderRadius: 4,
-                          padding: "1px 6px",
+                          padding: "2px 8px",
                           textTransform: "uppercase",
                           letterSpacing: "0.06em",
                         }}
@@ -466,7 +466,7 @@ export default function ReviewPage() {
                       onChange={(e) => setEditSubject(e.target.value)}
                       style={{
                         fontFamily: serif,
-                        fontSize: 27,
+                        fontSize: 31,
                         fontWeight: 400,
                         color: INK,
                         letterSpacing: "-0.01em",
@@ -475,8 +475,8 @@ export default function ReviewPage() {
                         borderBottom: "1px solid #C9BEA6",
                         outline: "none",
                         width: "100%",
-                        marginTop: 8,
-                        padding: "2px 0",
+                        marginTop: 10,
+                        padding: "3px 0",
                         lineHeight: 1.2,
                       }}
                     />
@@ -484,11 +484,11 @@ export default function ReviewPage() {
                     <div
                       style={{
                         fontFamily: serif,
-                        fontSize: 27,
+                        fontSize: 31,
                         fontWeight: 400,
                         color: INK,
                         letterSpacing: "-0.01em",
-                        marginTop: 8,
+                        marginTop: 10,
                         lineHeight: 1.2,
                       }}
                     >
@@ -500,11 +500,11 @@ export default function ReviewPage() {
                   <div
                     style={{
                       fontFamily: mono,
-                      fontSize: 10,
+                      fontSize: 11,
                       color: FAINT2,
                       textTransform: "uppercase",
                       letterSpacing: "0.06em",
-                      marginTop: 6,
+                      marginTop: 8,
                     }}
                   >
                     TO — {currentContact?.contactEmail ?? "—"}
@@ -512,14 +512,14 @@ export default function ReviewPage() {
                 </div>
 
                 {/* Card body */}
-                <div style={{ padding: "20px 20px 0" }}>
+                <div style={{ padding: "28px 28px 0" }}>
                   {editMode ? (
                     <textarea
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       style={{
                         fontFamily: grotesk,
-                        fontSize: 14.5,
+                        fontSize: 16.5,
                         lineHeight: 1.75,
                         color: "#2A251C",
                         background: "transparent",
@@ -528,7 +528,7 @@ export default function ReviewPage() {
                         outline: "none",
                         width: "100%",
                         minHeight: 260,
-                        padding: "10px 12px",
+                        padding: "14px 18px",
                         resize: "vertical",
                         boxSizing: "border-box",
                       }}
@@ -537,7 +537,7 @@ export default function ReviewPage() {
                     <div
                       style={{
                         fontFamily: grotesk,
-                        fontSize: 14.5,
+                        fontSize: 16.5,
                         lineHeight: 1.75,
                         color: "#2A251C",
                         whiteSpace: "pre-wrap",
@@ -553,7 +553,7 @@ export default function ReviewPage() {
                   <div
                     style={{
                       margin: "16px 20px 18px",
-                      padding: "10px 14px",
+                      padding: "14px 20px",
                       borderLeft: `2px solid ${AMBER_BORDER}`,
                       backgroundColor: "#F6F1E2",
                     }}
@@ -561,7 +561,7 @@ export default function ReviewPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         color: AMBER_TEXT,
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
@@ -572,7 +572,7 @@ export default function ReviewPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 10.5,
+                        fontSize: 11.5,
                         color: "#7A6E52",
                       }}
                     >
@@ -589,11 +589,11 @@ export default function ReviewPage() {
                 {/* Card footer */}
                 <div
                   style={{
-                    padding: "14px 20px",
+                    padding: "20px 28px",
                     borderTop: "1px solid #E4DBC8",
                     backgroundColor: "#F1EBDD",
                     display: "flex",
-                    gap: 10,
+                    gap: 14,
                   }}
                 >
                   {editMode ? (
@@ -645,11 +645,11 @@ export default function ReviewPage() {
 
               {/* Keyboard hint */}
               {!editMode && (
-                <div style={{ textAlign: "center", marginTop: 12 }}>
+                <div style={{ textAlign: "center", marginTop: 16 }}>
                   <span
                     style={{
                       fontFamily: mono,
-                      fontSize: 9.5,
+                      fontSize: 10.5,
                       color: FAINT,
                       textTransform: "uppercase",
                       letterSpacing: "0.1em",
@@ -667,7 +667,7 @@ export default function ReviewPage() {
             style={{
               width: 260,
               flexShrink: 0,
-              padding: "14px 16px 20px",
+              padding: "20px 22px 28px",
               borderLeft: "1px solid #D8CFBB",
               backgroundColor: "#F4F0E6",
               borderRadius: "0 10px 10px 0",
@@ -675,7 +675,7 @@ export default function ReviewPage() {
           >
             <MonoLabel
               style={{
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: "0.14em",
                 color: FAINT,
               }}
@@ -695,7 +695,8 @@ export default function ReviewPage() {
               return (
                 <Panel
                   key={d._id}
-                  style={{ padding: "10px 12px", marginTop: 10, cursor: "pointer" }}
+                  className="row-hover"
+                  style={{ padding: "14px 18px", marginTop: 14, cursor: "pointer" }}
                   onClick={() => {
                     setCurrentIdx(actualIdx);
                     setEditMode(false);
@@ -712,7 +713,7 @@ export default function ReviewPage() {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 6,
+                        gap: 8,
                         flex: 1,
                         minWidth: 0,
                         overflow: "hidden",
@@ -722,7 +723,7 @@ export default function ReviewPage() {
                         style={{
                           fontFamily: grotesk,
                           fontWeight: 600,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           color: INK,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -736,11 +737,11 @@ export default function ReviewPage() {
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 9,
+                        fontSize: 10,
                         border: "1px solid #C9BEA6",
                         color: FAINT2,
                         borderRadius: 3,
-                        padding: "1px 4px",
+                        padding: "2px 6px",
                         textTransform: "uppercase",
                         flexShrink: 0,
                         marginLeft: 6,
@@ -753,11 +754,11 @@ export default function ReviewPage() {
                   <div
                     style={{
                       fontFamily: mono,
-                      fontSize: 9,
+                      fontSize: 10,
                       color: FAINT2,
                       textTransform: "uppercase",
                       letterSpacing: "0.04em",
-                      marginTop: 4,
+                      marginTop: 6,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -770,7 +771,7 @@ export default function ReviewPage() {
             })}
 
             {/* Approve all safe drafts */}
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 18 }}>
               <Button
                 variant="outline"
                 style={{ width: "100%" }}
@@ -792,7 +793,7 @@ export default function ReviewPage() {
             title="APPROVED · QUEUED FOR SEND"
             count={approved.length}
           />
-          <Panel style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
+          <Panel style={{ padding: 0, overflow: "hidden", marginTop: 14 }}>
             {approved.map((log, idx) => {
               const contact = contactMap[log.contactId] ?? null;
               return (
@@ -805,13 +806,13 @@ export default function ReviewPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "10px 16px",
+                      padding: "14px 22px",
                     }}
                   >
                     <span
                       style={{
                         fontFamily: mono,
-                        fontSize: 10,
+                        fontSize: 11,
                         color: "#5A5344",
                         textTransform: "uppercase",
                         letterSpacing: "0.06em",
@@ -852,7 +853,7 @@ function UnapproveButton({ onUnapprove }: { onUnapprove: () => void }) {
       onMouseLeave={() => setHovered(false)}
       style={{
         fontFamily: mono,
-        fontSize: 9.5,
+        fontSize: 10.5,
         textTransform: "uppercase",
         letterSpacing: "0.06em",
         color: FAINT,
