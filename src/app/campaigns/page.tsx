@@ -115,20 +115,20 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
   );
 
   return (
-    <Panel style={{ padding: "16px 20px" }}>
+    <Panel style={{ padding: "22px 28px" }}>
       {/* Row 1 */}
       <div
         style={{
           display: "flex",
           alignItems: "baseline",
           justifyContent: "space-between",
-          gap: 12,
+          gap: 16,
         }}
       >
         <span
           style={{
             fontFamily: serif,
-            fontSize: 20,
+            fontSize: 23,
             color: INK,
             letterSpacing: "-0.01em",
           }}
@@ -138,7 +138,7 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
         <span
           style={{
             fontFamily: mono,
-            fontSize: 9.5,
+            fontSize: 10.5,
             color: FAINT2,
             textTransform: "uppercase",
             letterSpacing: "0.08em",
@@ -153,7 +153,7 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
       {/* Row 2 – funnel bar */}
       <div
         style={{
-          marginTop: 12,
+          marginTop: 16,
           height: 12,
           borderRadius: 6,
           overflow: "hidden",
@@ -178,12 +178,12 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
       </div>
 
       {/* Row 3 – legend / loading / error */}
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 14 }}>
         {statsLoading && (
           <span
             style={{
               fontFamily: mono,
-              fontSize: 9.5,
+              fontSize: 10.5,
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               color: FAINT,
@@ -196,7 +196,7 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
           <span
             style={{
               fontFamily: mono,
-              fontSize: 9.5,
+              fontSize: 10.5,
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               color: CLAY,
@@ -206,16 +206,16 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
           </span>
         )}
         {!statsLoading && !statsError && stats && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
             {activeStages.map((s) => (
               <span
                 key={s}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
+                  gap: 7,
                   fontFamily: mono,
-                  fontSize: 9.5,
+                  fontSize: 10.5,
                   textTransform: "uppercase",
                   letterSpacing: "0.04em",
                   color: "#7A6E52",
@@ -307,18 +307,18 @@ export default function CampaignsPage() {
 
   const monoFieldLabel: React.CSSProperties = {
     fontFamily: mono,
-    fontSize: 9.5,
+    fontSize: 10.5,
     textTransform: "uppercase",
     letterSpacing: "0.12em",
     color: FAINT2,
     display: "block",
-    marginBottom: 5,
+    marginBottom: 7,
   };
 
   const LS_COL_NUMS: Array<keyof LeadSourceRow> = ["total", "contacted", "replied", "won"];
 
   return (
-    <div style={{ padding: "24px 30px 40px" }}>
+    <div className="page-enter" style={{ padding: "34px 42px 56px" }}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -326,12 +326,12 @@ export default function CampaignsPage() {
           <span
             style={{
               fontFamily: mono,
-              fontSize: 10,
+              fontSize: 11,
               textTransform: "uppercase",
               letterSpacing: "0.14em",
               color: FAINT,
               display: "block",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             {campaigns.length} ACTIVE CAMPAIGNS
@@ -339,7 +339,7 @@ export default function CampaignsPage() {
           <h1
             style={{
               fontFamily: serif,
-              fontSize: 34,
+              fontSize: 40,
               fontWeight: 400,
               color: INK,
               letterSpacing: "-0.01em",
@@ -350,7 +350,7 @@ export default function CampaignsPage() {
             Campaigns
           </h1>
         </div>
-        <Button variant="primary" onClick={focusForm} style={{ marginTop: 4, flexShrink: 0 }}>
+        <Button variant="primary" onClick={focusForm} style={{ marginTop: 6, flexShrink: 0 }}>
           + New campaign
         </Button>
       </div>
@@ -359,9 +359,9 @@ export default function CampaignsPage() {
       <div
         style={{
           display: "flex",
-          gap: 20,
+          gap: 28,
           alignItems: "flex-start",
-          marginTop: 20,
+          marginTop: 28,
         }}
       >
         {/* LEFT */}
@@ -371,28 +371,28 @@ export default function CampaignsPage() {
             minWidth: 0,
             display: "flex",
             flexDirection: "column",
-            gap: 14,
+            gap: 18,
           }}
         >
           {loading && (
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 color: FAINT,
                 display: "block",
                 textAlign: "center",
-                padding: "40px 0",
+                padding: "56px 0",
               }}
             >
               LOADING…
             </span>
           )}
           {!loading && error && (
-            <Panel style={{ padding: "16px 20px" }}>
-              <span style={{ fontFamily: mono, fontSize: 9.5, color: CLAY, textTransform: "uppercase" }}>
+            <Panel style={{ padding: "22px 28px" }}>
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: CLAY, textTransform: "uppercase" }}>
                 {error}
               </span>
             </Panel>
@@ -401,13 +401,13 @@ export default function CampaignsPage() {
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 color: FAINT,
                 display: "block",
                 textAlign: "center",
-                padding: "40px 0",
+                padding: "56px 0",
               }}
             >
               NO CAMPAIGNS YET · CREATE ONE TO START
@@ -419,16 +419,16 @@ export default function CampaignsPage() {
 
           {/* Lead sources */}
           {leadSources.length > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 10 }}>
               <SectionHeader title="LEAD SOURCES" />
-              <div style={{ marginTop: 10 }}>
+              <div style={{ marginTop: 14 }}>
                 <Panel style={{ padding: 0, overflow: "hidden" }}>
                   {/* Table header */}
                   <div
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1.4fr repeat(6, 1fr)",
-                      padding: "10px 16px",
+                      padding: "14px 22px",
                       borderBottom: "1px solid #E4DBC8",
                     }}
                   >
@@ -438,7 +438,7 @@ export default function CampaignsPage() {
                           key={col}
                           style={{
                             fontFamily: mono,
-                            fontSize: 9,
+                            fontSize: 10,
                             textTransform: "uppercase",
                             letterSpacing: "0.1em",
                             color: FAINT,
@@ -458,7 +458,7 @@ export default function CampaignsPage() {
                         style={{
                           display: "grid",
                           gridTemplateColumns: "1.4fr repeat(6, 1fr)",
-                          padding: "10px 16px",
+                          padding: "14px 22px",
                           alignItems: "center",
                         }}
                       >
@@ -466,7 +466,7 @@ export default function CampaignsPage() {
                           style={{
                             fontFamily: grotesk,
                             fontWeight: 600,
-                            fontSize: 13,
+                            fontSize: 14.5,
                             color: INK,
                           }}
                         >
@@ -477,7 +477,7 @@ export default function CampaignsPage() {
                             key={key}
                             style={{
                               fontFamily: mono,
-                              fontSize: 11,
+                              fontSize: 12,
                               color: "#5A5344",
                               textAlign: "right",
                             }}
@@ -488,7 +488,7 @@ export default function CampaignsPage() {
                         <span
                           style={{
                             fontFamily: mono,
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "#5A5344",
                             textAlign: "right",
                           }}
@@ -498,7 +498,7 @@ export default function CampaignsPage() {
                         <span
                           style={{
                             fontFamily: mono,
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "#5A5344",
                             textAlign: "right",
                           }}
@@ -516,11 +516,11 @@ export default function CampaignsPage() {
 
         {/* RIGHT – Create form */}
         <div ref={formRef} style={{ width: 300, flexShrink: 0 }}>
-          <Panel style={{ padding: "18px 20px" }}>
+          <Panel style={{ padding: "26px 28px" }}>
             <h2
               style={{
                 fontFamily: serif,
-                fontSize: 20,
+                fontSize: 23,
                 fontWeight: 400,
                 color: INK,
                 margin: 0,
@@ -531,7 +531,7 @@ export default function CampaignsPage() {
             </h2>
             <form onSubmit={handleCreate}>
               {/* Campaign name */}
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 18 }}>
                 <label style={monoFieldLabel}>CAMPAIGN NAME</label>
                 <input
                   ref={nameInputRef}
@@ -544,8 +544,8 @@ export default function CampaignsPage() {
               </div>
 
               {/* Offer summary */}
-              <div style={{ marginTop: 14 }}>
-                <label style={{ ...monoFieldLabel, marginBottom: 5 }}>
+              <div style={{ marginTop: 18 }}>
+                <label style={{ ...monoFieldLabel, marginBottom: 7 }}>
                   OFFER SUMMARY{" "}
                   <span style={{ color: "#96712A" }}>· FED TO CLAUDE</span>
                 </label>
@@ -561,7 +561,7 @@ export default function CampaignsPage() {
               </div>
 
               {/* Tone notes */}
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 18 }}>
                 <label style={monoFieldLabel}>TONE NOTES</label>
                 <input
                   className={inputClass}
@@ -572,9 +572,9 @@ export default function CampaignsPage() {
               </div>
 
               {/* Sequence spacing */}
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 18 }}>
                 <label style={monoFieldLabel}>SEQUENCE SPACING</label>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 10 }}>
                   {[
                     { val: day0, set: setDay0 },
                     { val: day1, set: setDay1 },
@@ -602,10 +602,10 @@ export default function CampaignsPage() {
                           border: "none",
                           background: "transparent",
                           fontFamily: mono,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           color: INK,
                           textAlign: "center",
-                          padding: "8px 0 8px 8px",
+                          padding: "12px 0 12px 12px",
                           outline: "none",
                           minWidth: 0,
                         }}
@@ -613,7 +613,7 @@ export default function CampaignsPage() {
                       <span
                         style={{
                           fontFamily: mono,
-                          fontSize: 11,
+                          fontSize: 12,
                           color: FAINT2,
                           paddingRight: 8,
                           flexShrink: 0,
@@ -627,11 +627,11 @@ export default function CampaignsPage() {
               </div>
 
               {createError && (
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 16 }}>
                   <span
                     style={{
                       fontFamily: mono,
-                      fontSize: 9.5,
+                      fontSize: 10.5,
                       textTransform: "uppercase",
                       letterSpacing: "0.08em",
                       color: CLAY,
@@ -642,7 +642,7 @@ export default function CampaignsPage() {
                 </div>
               )}
 
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginTop: 22 }}>
                 <Button
                   type="submit"
                   variant="primary"
