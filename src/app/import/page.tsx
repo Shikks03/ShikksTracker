@@ -257,7 +257,7 @@ export default function ImportPage() {
           display: "flex",
           backgroundColor: "#E4DDC9",
           borderRadius: 8,
-          padding: 3,
+          padding: 4,
           marginTop: 18,
         }}
       >
@@ -519,7 +519,7 @@ export default function ImportPage() {
                     backgroundColor: bg,
                     border: `1px solid ${border}`,
                     borderRadius: 8,
-                    padding: 12,
+                    padding: 16,
                     textAlign: "center",
                   }}
                 >
