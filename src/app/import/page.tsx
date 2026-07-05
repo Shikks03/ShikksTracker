@@ -189,12 +189,12 @@ export default function ImportPage() {
 
   const monoLabel: React.CSSProperties = {
     fontFamily: mono,
-    fontSize: 9.5,
+    fontSize: 10.5,
     textTransform: "uppercase",
     letterSpacing: "0.12em",
     color: FAINT2,
     display: "block",
-    marginBottom: 5,
+    marginBottom: 7,
   };
 
   const STAT_TILES = [
@@ -205,13 +205,13 @@ export default function ImportPage() {
   ] as const;
 
   return (
-    <div style={{ maxWidth: 560, margin: "0 auto", padding: "32px 30px 60px" }}>
+    <div className="page-enter" style={{ maxWidth: 560, margin: "0 auto", padding: "44px 42px 80px" }}>
 
       {/* H1 */}
       <h1
         style={{
           fontFamily: serif,
-          fontSize: 34,
+          fontSize: 40,
           fontWeight: 400,
           color: INK,
           letterSpacing: "-0.01em",
@@ -225,19 +225,19 @@ export default function ImportPage() {
       <div
         style={{
           fontFamily: mono,
-          fontSize: 9.5,
+          fontSize: 10.5,
           textTransform: "uppercase",
           letterSpacing: "0.14em",
           color: FAINT,
           textAlign: "center",
-          marginTop: 10,
+          marginTop: 14,
         }}
       >
         SUPPRESSED EMAILS ARE ALWAYS SKIPPED
       </div>
 
       {/* Campaign select */}
-      <div style={{ marginTop: 18 }}>
+      <div style={{ marginTop: 24 }}>
         <label style={monoLabel}>CAMPAIGN</label>
         <select
           className={inputClass}
@@ -258,7 +258,7 @@ export default function ImportPage() {
           backgroundColor: "#E4DDC9",
           borderRadius: 8,
           padding: 3,
-          marginTop: 14,
+          marginTop: 18,
         }}
       >
         {(["csv", "manual"] as const).map((t) => (
@@ -270,8 +270,8 @@ export default function ImportPage() {
               flex: 1,
               fontFamily: grotesk,
               fontWeight: 600,
-              fontSize: 13,
-              padding: "8px",
+              fontSize: 14.5,
+              padding: "12px",
               borderRadius: 6,
               border: tab === t ? "1px solid #D3C9B4" : "1px solid transparent",
               backgroundColor: tab === t ? "#FCFAF3" : "transparent",
@@ -287,7 +287,7 @@ export default function ImportPage() {
 
       {/* CSV tab */}
       {tab === "csv" && (
-        <div style={{ marginTop: 14 }}>
+        <div style={{ marginTop: 18 }}>
           <input
             ref={fileRef}
             type="file"
@@ -304,7 +304,7 @@ export default function ImportPage() {
               backgroundColor: isDragOver ? "#F1E9D2" : "#F5EFDF",
               border: `1.5px dashed ${isDragOver ? "#A99E86" : "#CBBF9F"}`,
               borderRadius: 10,
-              padding: "36px 20px",
+              padding: "50px 28px",
               textAlign: "center",
               cursor: uploading ? "default" : "pointer",
               transition: "all 0.1s",
@@ -327,11 +327,11 @@ export default function ImportPage() {
             </div>
 
             {uploading ? (
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 16 }}>
                 <span
                   style={{
                     fontFamily: mono,
-                    fontSize: 9.5,
+                    fontSize: 10.5,
                     textTransform: "uppercase",
                     letterSpacing: "0.08em",
                     color: FAINT,
@@ -346,9 +346,9 @@ export default function ImportPage() {
                   style={{
                     fontFamily: grotesk,
                     fontWeight: 600,
-                    fontSize: 14,
+                    fontSize: 16,
                     color: INK,
-                    marginTop: 12,
+                    marginTop: 16,
                   }}
                 >
                   Drop your CSV here
@@ -356,9 +356,9 @@ export default function ImportPage() {
                 <div
                   style={{
                     fontFamily: grotesk,
-                    fontSize: 13,
+                    fontSize: 14.5,
                     color: "#5A5344",
-                    marginTop: 4,
+                    marginTop: 6,
                   }}
                 >
                   or{" "}
@@ -366,11 +366,11 @@ export default function ImportPage() {
                     browse files
                   </span>
                 </div>
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 16 }}>
                   <div
                     style={{
                       fontFamily: mono,
-                      fontSize: 9,
+                      fontSize: 10,
                       color: FAINT2,
                       letterSpacing: "0.06em",
                       lineHeight: 1.8,
@@ -385,11 +385,11 @@ export default function ImportPage() {
             )}
           </div>
           {uploadError && (
-            <div style={{ marginTop: 10, textAlign: "center" }}>
+            <div style={{ marginTop: 14, textAlign: "center" }}>
               <span
                 style={{
                   fontFamily: mono,
-                  fontSize: 9.5,
+                  fontSize: 10.5,
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
                   color: CLAY,
@@ -406,7 +406,7 @@ export default function ImportPage() {
       {tab === "manual" && (
         <form
           onSubmit={handleManualAdd}
-          style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}
+          style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}
         >
           <div>
             <label style={monoLabel}>BUSINESS NAME *</label>
@@ -461,7 +461,7 @@ export default function ImportPage() {
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 color: "#1C6E3A",
@@ -474,7 +474,7 @@ export default function ImportPage() {
             <span
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 color: CLAY,
@@ -491,12 +491,12 @@ export default function ImportPage() {
 
       {/* Last import panel */}
       {lastImport && (
-        <div style={{ marginTop: 20 }}>
-          <Panel style={{ padding: "14px 16px" }}>
+        <div style={{ marginTop: 28 }}>
+          <Panel style={{ padding: "20px 22px" }}>
             <div
               style={{
                 fontFamily: mono,
-                fontSize: 9.5,
+                fontSize: 10.5,
                 textTransform: "uppercase",
                 letterSpacing: "0.1em",
                 color: FAINT,
@@ -508,8 +508,8 @@ export default function ImportPage() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(4, 1fr)",
-                gap: 10,
-                marginTop: 12,
+                gap: 14,
+                marginTop: 16,
               }}
             >
               {STAT_TILES.map(({ key, label, bg, border, color }) => (
@@ -526,7 +526,7 @@ export default function ImportPage() {
                   <div
                     style={{
                       fontFamily: serif,
-                      fontSize: 26,
+                      fontSize: 30,
                       fontWeight: 400,
                       color,
                       lineHeight: 1,
@@ -537,11 +537,11 @@ export default function ImportPage() {
                   <div
                     style={{
                       fontFamily: mono,
-                      fontSize: 8.5,
+                      fontSize: 9.5,
                       textTransform: "uppercase",
                       letterSpacing: "0.1em",
                       color,
-                      marginTop: 6,
+                      marginTop: 8,
                     }}
                   >
                     {label}
