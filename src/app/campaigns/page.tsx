@@ -615,7 +615,7 @@ export default function CampaignsPage() {
                           fontFamily: mono,
                           fontSize: 12,
                           color: FAINT2,
-                          paddingRight: 8,
+                          paddingRight: 10,
                           flexShrink: 0,
                         }}
                       >
