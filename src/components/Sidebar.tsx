@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { index: "03", label: "Campaigns",    href: "/campaigns",   showBadge: false },
   { index: "04", label: "Import",       href: "/import",      showBadge: false },
   { index: "05", label: "Suppressions", href: "/suppressions",showBadge: false },
+  { index: "06", label: "Compose",      href: "/compose",     showBadge: false },
 ];
 
 /* ── Typography helpers (inline so no "use client" needed in ui.tsx) ── */
