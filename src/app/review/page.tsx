@@ -98,6 +98,13 @@ export default function ReviewPage() {
   const [campaignMap, setCampaignMap] = useState<Record<string, Campaign>>({});
   const [globalError, setGlobalError] = useState<string | null>(null);
 
+  // ── Send batch state ──────────────────────────────────────────────────────────
+  const [checkedIds,   setCheckedIds]   = useState<Set<string>>(new Set());
+  const [sending,      setSending]      = useState(false);
+  const [sendResults,  setSendResults]  = useState<
+    { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[]
+  >([]);
+
   // Current draft index
   const [currentIdx, setCurrentIdx] = useState(0);
 
@@ -125,6 +132,8 @@ export default function ReviewPage() {
 
     setDrafts(draftRes.data ?? []);
     setApproved(approvedRes.data ?? []);
+    // Default all newly loaded approved logs to checked
+    setCheckedIds(new Set((approvedRes.data ?? []).map((l) => l._id)));
 
     const cMap: Record<string, ContactDoc> = {};
     for (const c of contactsRes.data ?? []) cMap[c._id] = c;
@@ -186,6 +195,43 @@ export default function ReviewPage() {
     });
     if (error) { setGlobalError(`Unapprove failed: ${error}`); return; }
     await loadAll();
+  }
+
+  async function handleSendBatch() {
+    if (checkedIds.size === 0) return;
+    setSending(true);
+    setSendResults([]);
+    setGlobalError(null);
+
+    try {
+      const res = await fetch("/api/send-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(checkedIds) }),
+      });
+
+      if (res.status === 429) {
+        const data = await res.json().catch(() => ({}));
+        setGlobalError(`Daily send cap reached (${(data as { cap?: number }).cap ?? 15}/day).`);
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setGlobalError((data as { error?: string }).error ?? `HTTP ${res.status}`);
+        return;
+      }
+
+      const data = await res.json() as {
+        results: { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[];
+      };
+      setSendResults(data.results);
+    } catch (err) {
+      setGlobalError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSending(false);
+      await loadAll();
+    }
   }
 
   async function handleApproveAllSafe() {
@@ -787,55 +833,114 @@ export default function ReviewPage() {
       )}
 
       {/* ── 3. APPROVED · QUEUED STRIP ── */}
-      {approved.length > 0 && (
+      {(approved.length > 0 || sendResults.length > 0) && (
         <div style={{ marginTop: 28 }}>
           <SectionHeader
             title="APPROVED · QUEUED FOR SEND"
             count={approved.length}
           />
-          <Panel style={{ padding: 0, overflow: "hidden", marginTop: 14 }}>
-            {approved.map((log, idx) => {
-              const contact = contactMap[log.contactId] ?? null;
-              return (
-                <div key={log._id}>
-                  {idx > 0 && (
-                    <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />
-                  )}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "14px 22px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: mono,
-                        fontSize: 11,
-                        color: "#5A5344",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        marginRight: 16,
-                      }}
-                    >
-                      {(contact?.businessName ?? "—").toUpperCase()}
-                      {" · "}
-                      {ordinalStage(log.stage)} TOUCH
-                      {" · "}
-                      <span style={{ color: FAINT2 }}>{log.subject}</span>
+
+          {/* Send results panel */}
+          {sendResults.length > 0 && (
+            <Panel style={{ padding: "16px 22px", marginTop: 14, overflow: "hidden" }}>
+              {sendResults.map((r, i) => (
+                <div key={r.id}>
+                  {i > 0 && <div style={{ height: 1, backgroundColor: "#E4DBC8", margin: "8px 0" }} />}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontFamily: mono, fontSize: 13, color: r.status === "sent" ? FOREST : CLAY, flexShrink: 0 }}>
+                      {r.status === "sent" ? "✓" : "✗"}
                     </span>
-                    <UnapproveButton onUnapprove={() => handleUnapprove(log._id)} />
+                    <span style={{ fontFamily: mono, fontSize: 11, color: "#5A5344", textTransform: "uppercase", letterSpacing: "0.06em", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.contactName.toUpperCase()} · {r.subject}
+                    </span>
+                    {r.error && (
+                      <span style={{ fontFamily: mono, fontSize: 10.5, color: CLAY, flexShrink: 0 }}>
+                        {r.error}
+                      </span>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </Panel>
+              ))}
+            </Panel>
+          )}
+
+          {approved.length > 0 && (
+            <>
+              <Panel style={{ padding: 0, overflow: "hidden", marginTop: 14 }}>
+                {approved.map((log, idx) => {
+                  const contact = contactMap[log.contactId] ?? null;
+                  const checked = checkedIds.has(log._id);
+                  return (
+                    <div key={log._id}>
+                      {idx > 0 && (
+                        <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />
+                      )}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "14px 22px",
+                        }}
+                      >
+                        {/* Checkbox */}
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = new Set(checkedIds);
+                            if (e.target.checked) next.add(log._id);
+                            else next.delete(log._id);
+                            setCheckedIds(next);
+                          }}
+                          style={{ marginRight: 14, cursor: "pointer", flexShrink: 0, width: 15, height: 15, accentColor: FOREST }}
+                        />
+
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 11,
+                            color: "#5A5344",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            marginRight: 16,
+                          }}
+                        >
+                          {(contact?.businessName ?? "—").toUpperCase()}
+                          {" · "}
+                          {ordinalStage(log.stage)} TOUCH
+                          {" · "}
+                          <span style={{ color: FAINT2 }}>{log.subject}</span>
+                        </span>
+                        <UnapproveButton onUnapprove={() => handleUnapprove(log._id)} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Panel>
+
+              {/* Send button */}
+              {checkedIds.size > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <Button
+                    variant="primary"
+                    style={{ width: "100%" }}
+                    disabled={sending}
+                    onClick={handleSendBatch}
+                  >
+                    {sending
+                      ? "Sending…"
+                      : `Send ${checkedIds.size} email${checkedIds.size === 1 ? "" : "s"}`}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
