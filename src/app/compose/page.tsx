@@ -8,32 +8,64 @@ const serif   = "var(--font-instrument-serif)";
 const grotesk = "var(--font-familjen)";
 const mono    = "var(--font-jetbrains)";
 
-const INK   = "#1A1712";
-const FAINT = "#8E836C";
-const CLAY  = "#BC5228";
+const INK    = "#1A1712";
+const FAINT  = "#8E836C";
+const FAINT2 = "#9A8F76";
+const CLAY   = "#BC5228";
 const FOREST = "#1C4B3A";
+
+interface CampaignItem {
+  _id: string;
+  name: string;
+}
 
 interface ContactItem {
   _id: string;
   businessName: string;
   contactEmail: string;
+  contactName?: string;
   currentStage: number;
+}
+
+interface BatchResult {
+  created: number;
+  skipped: { businessName: string; reason: string }[];
 }
 
 export default function ComposePage() {
   const router = useRouter();
 
-  const [contacts, setContacts]       = useState<ContactItem[]>([]);
-  const [contactId, setContactId]     = useState("");
-  const [stage, setStage]             = useState<1 | 2 | 3 | null>(null);
-  const [subject, setSubject]         = useState("");
-  const [body, setBody]               = useState("");
-  const [submitting, setSubmitting]   = useState(false);
-  const [apiError, setApiError]       = useState<string | null>(null);
+  const [campaigns,   setCampaigns]   = useState<CampaignItem[]>([]);
+  const [campaignId,  setCampaignId]  = useState("");
+  const [contacts,    setContacts]    = useState<ContactItem[]>([]);
+  const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set());
+  const [subject,     setSubject]     = useState("");
+  const [body,        setBody]        = useState("");
+  const [submitting,  setSubmitting]  = useState(false);
+  const [apiError,    setApiError]    = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [result,      setResult]      = useState<BatchResult | null>(null);
 
+  // Load campaigns once
   useEffect(() => {
-    fetch("/api/contacts?status=active")
+    fetch("/api/campaigns")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        if (Array.isArray(data)) setCampaigns(data as CampaignItem[]);
+      })
+      .catch(() => {});
+  }, []);
+
+  function handleCampaignChange(id: string) {
+    setCampaignId(id);
+    setCheckedIds(new Set());
+    setContacts([]);
+    setResult(null);
+    setFieldErrors({});
+    setApiError(null);
+    if (!id) return;
+
+    fetch(`/api/contacts?campaignId=${id}&status=active`)
       .then((r) => r.json())
       .then((data: unknown) => {
         if (Array.isArray(data)) {
@@ -44,26 +76,28 @@ export default function ComposePage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }
 
-  function handleContactChange(id: string) {
-    setContactId(id);
-    const c = contacts.find((c) => c._id === id);
-    if (c) {
-      setStage((Math.min(c.currentStage + 1, 3)) as 1 | 2 | 3);
-    } else {
-      setStage(null);
-    }
-    setFieldErrors({});
-    setApiError(null);
+  function toggleContact(id: string, on: boolean) {
+    const next = new Set(checkedIds);
+    if (on) next.add(id);
+    else next.delete(id);
+    setCheckedIds(next);
+  }
+
+  const allChecked = contacts.length > 0 && checkedIds.size === contacts.length;
+
+  function toggleAll() {
+    if (allChecked) setCheckedIds(new Set());
+    else setCheckedIds(new Set(contacts.map((c) => c._id)));
   }
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
-    if (!contactId)       errs.contact = "Select a contact";
-    if (!stage)           errs.stage   = "Select a stage";
-    if (!subject.trim())  errs.subject = "Subject is required";
-    if (!body.trim())     errs.body    = "Body is required";
+    if (!campaignId)          errs.campaign = "Select a campaign";
+    if (checkedIds.size === 0) errs.recipients = "Select at least one recipient";
+    if (!subject.trim())      errs.subject = "Subject is required";
+    if (!body.trim())         errs.body = "Body is required";
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -74,14 +108,14 @@ export default function ComposePage() {
 
     setSubmitting(true);
     setApiError(null);
+    setResult(null);
 
     try {
-      const res = await fetch("/api/email-logs", {
+      const res = await fetch("/api/email-logs/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contactId,
-          stage,
+          contactIds: Array.from(checkedIds),
           subject: subject.trim(),
           body: body.trim(),
         }),
@@ -92,9 +126,15 @@ export default function ComposePage() {
         throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
       }
 
-      router.push("/review");
+      const data = (await res.json()) as BatchResult;
+      setResult(data);
+      // Clear the form so it can't be accidentally re-sent; keep campaign + result.
+      setCheckedIds(new Set());
+      setSubject("");
+      setBody("");
     } catch (err) {
       setApiError(err instanceof Error ? err.message : String(err));
+    } finally {
       setSubmitting(false);
     }
   }
@@ -117,6 +157,16 @@ export default function ComposePage() {
     display: "block",
   };
 
+  const noteStyle: React.CSSProperties = {
+    fontFamily: mono,
+    fontSize: 10,
+    color: FAINT2,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    marginTop: 6,
+    display: "block",
+  };
+
   return (
     <div className="page-enter" style={{ padding: "34px 42px 56px", minHeight: "100%" }}>
 
@@ -132,18 +182,18 @@ export default function ComposePage() {
         <form onSubmit={handleSubmit}>
           <Panel style={{ padding: 28 }}>
 
-            {/* Contact */}
+            {/* Campaign */}
             <div style={{ marginBottom: 22 }}>
-              <label style={labelStyle}>Contact</label>
+              <label style={labelStyle}>Campaign</label>
               <select
-                value={contactId}
-                onChange={(e) => handleContactChange(e.target.value)}
+                value={campaignId}
+                onChange={(e) => handleCampaignChange(e.target.value)}
                 style={{
                   fontFamily: grotesk,
                   fontSize: 15,
-                  color: contactId ? INK : FAINT,
+                  color: campaignId ? INK : FAINT,
                   backgroundColor: "#F8F5EC",
-                  border: `1px solid ${fieldErrors.contact ? CLAY : "#C9BEA6"}`,
+                  border: `1px solid ${fieldErrors.campaign ? CLAY : "#C9BEA6"}`,
                   borderRadius: 6,
                   padding: "10px 14px",
                   width: "100%",
@@ -151,48 +201,88 @@ export default function ComposePage() {
                   cursor: "pointer",
                 }}
               >
-                <option value="">Select a contact…</option>
-                {contacts.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.businessName} ({c.contactEmail})
-                  </option>
+                <option value="">Select a campaign…</option>
+                {campaigns.map((c) => (
+                  <option key={c._id} value={c._id}>{c.name}</option>
                 ))}
               </select>
-              {fieldErrors.contact && <span style={fieldErrorStyle}>{fieldErrors.contact}</span>}
+              {fieldErrors.campaign && <span style={fieldErrorStyle}>{fieldErrors.campaign}</span>}
             </div>
 
-            {/* Stage */}
-            <div style={{ marginBottom: 22 }}>
-              <label style={labelStyle}>Stage</label>
-              <div style={{ display: "flex", gap: 10 }}>
-                {([1, 2, 3] as const).map((s) => {
-                  const active = stage === s;
-                  return (
+            {/* Recipients */}
+            {campaignId && (
+              <div style={{ marginBottom: 22 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>
+                    Recipients · {checkedIds.size} selected
+                  </label>
+                  {contacts.length > 0 && (
                     <button
-                      key={s}
                       type="button"
-                      onClick={() => setStage(s)}
+                      onClick={toggleAll}
                       style={{
                         fontFamily: mono,
-                        fontSize: 11,
+                        fontSize: 10.5,
                         textTransform: "uppercase",
-                        letterSpacing: "0.08em",
-                        padding: "8px 18px",
-                        borderRadius: 6,
-                        border: `1px solid ${active ? FOREST : "#C9BEA6"}`,
-                        backgroundColor: active ? FOREST : "transparent",
-                        color: active ? "#F4EEDF" : FAINT,
+                        letterSpacing: "0.06em",
+                        color: FOREST,
+                        background: "none",
+                        border: "none",
                         cursor: "pointer",
-                        transition: "all 130ms ease",
+                        padding: 0,
                       }}
                     >
-                      {s === 1 ? "1ST" : s === 2 ? "2ND" : "3RD"}
+                      {allChecked ? "Clear" : "Select all"}
                     </button>
-                  );
-                })}
+                  )}
+                </div>
+
+                {contacts.length === 0 ? (
+                  <div style={{
+                    fontFamily: mono, fontSize: 10.5, color: FAINT2,
+                    textTransform: "uppercase", letterSpacing: "0.06em",
+                    padding: "14px 0",
+                  }}>
+                    NO ACTIVE CONTACTS IN THIS CAMPAIGN
+                  </div>
+                ) : (
+                  <div style={{
+                    border: `1px solid ${fieldErrors.recipients ? CLAY : "#C9BEA6"}`,
+                    borderRadius: 6,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                    backgroundColor: "#F8F5EC",
+                  }}>
+                    {contacts.map((c, idx) => (
+                      <label
+                        key={c._id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 14px",
+                          borderTop: idx > 0 ? "1px solid #E4DBC8" : "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checkedIds.has(c._id)}
+                          onChange={(e) => toggleContact(c._id, e.target.checked)}
+                          style={{ width: 15, height: 15, accentColor: FOREST, flexShrink: 0, cursor: "pointer" }}
+                        />
+                        <span style={{ fontFamily: grotesk, fontSize: 14.5, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.businessName}
+                          <span style={{ color: FAINT2 }}> ({c.contactEmail})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {fieldErrors.recipients && <span style={fieldErrorStyle}>{fieldErrors.recipients}</span>}
+                <span style={noteStyle}>STAGE AUTO-ASSIGNED PER CONTACT (NEXT TOUCH)</span>
               </div>
-              {fieldErrors.stage && <span style={fieldErrorStyle}>{fieldErrors.stage}</span>}
-            </div>
+            )}
 
             {/* Subject */}
             <div style={{ marginBottom: 22 }}>
@@ -221,7 +311,7 @@ export default function ComposePage() {
             </div>
 
             {/* Body */}
-            <div style={{ marginBottom: 28 }}>
+            <div style={{ marginBottom: 10 }}>
               <label style={labelStyle}>Body</label>
               <textarea
                 value={body}
@@ -244,25 +334,59 @@ export default function ComposePage() {
                 }}
               />
               {fieldErrors.body && <span style={fieldErrorStyle}>{fieldErrors.body}</span>}
+              <span style={noteStyle}>{"TOKENS: {{businessName}} · {{contactName}}"}</span>
             </div>
 
             <Button
               type="submit"
               variant="primary"
-              style={{ width: "100%" }}
-              disabled={submitting}
+              style={{ width: "100%", marginTop: 18 }}
+              disabled={submitting || checkedIds.size === 0}
             >
-              {submitting ? "Queuing…" : "Queue for send"}
+              {submitting
+                ? "Queuing…"
+                : `Queue ${checkedIds.size} email${checkedIds.size === 1 ? "" : "s"} for send`}
             </Button>
 
           </Panel>
         </form>
 
+        {/* API error */}
         {apiError && (
           <Panel style={{ padding: "16px 22px", marginTop: 16 }}>
             <MonoLabel style={{ color: CLAY, textTransform: "uppercase" }}>
               {apiError}
             </MonoLabel>
+          </Panel>
+        )}
+
+        {/* Result summary */}
+        {result && (
+          <Panel style={{ padding: "20px 22px", marginTop: 16 }}>
+            <MonoLabel style={{ fontSize: 12, letterSpacing: "0.10em", color: FOREST, display: "block" }}>
+              QUEUED {result.created}
+              {result.skipped.length > 0 && (
+                <span style={{ color: CLAY }}> · SKIPPED {result.skipped.length}</span>
+              )}
+            </MonoLabel>
+
+            {result.skipped.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {result.skipped.map((s, i) => (
+                  <div key={i} style={{ fontFamily: mono, fontSize: 11, color: CLAY, marginTop: 4 }}>
+                    {s.businessName} — {s.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              style={{ marginTop: 18 }}
+              onClick={() => router.push("/review")}
+            >
+              Go to Review Queue
+            </Button>
           </Panel>
         )}
       </div>
