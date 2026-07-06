@@ -5,12 +5,14 @@ export interface PlaceholderContact {
 
 /**
  * Replaces {{businessName}} and {{contactName}} tokens with the contact's
- * values. Internal whitespace inside the braces is tolerated
- * (e.g. "{{ contactName }}"). contactName falls back to "there" when the
- * contact has no name. Any other {{...}} token is left untouched.
+ * values. Matching is CASE-INSENSITIVE ({{CONTACTNAME}}, {{ContactName}},
+ * {{contactname}} all match) and internal whitespace inside the braces is
+ * tolerated (e.g. "{{ contactName }}"). contactName falls back to "there"
+ * when the contact has no name. Any other {{...}} token is left untouched.
  *
- * Used for manual multi-contact compose personalization. Applied to both
- * subject and body by the caller.
+ * Used for compose personalization. Applied to both subject and body at
+ * send time (src/lib/sequence.ts sendOneLog), so it is path-independent —
+ * it fills tokens no matter how the email was created.
  */
 export function applyPlaceholders(text: string, contact: PlaceholderContact): string {
   const name =
@@ -19,8 +21,8 @@ export function applyPlaceholders(text: string, contact: PlaceholderContact): st
       : "there";
 
   return text.replace(
-    /\{\{\s*(businessName|contactName)\s*\}\}/g,
+    /\{\{\s*(businessName|contactName)\s*\}\}/gi,
     (_match, token: string) =>
-      token === "businessName" ? contact.businessName : name
+      token.toLowerCase() === "businessname" ? contact.businessName : name
   );
 }

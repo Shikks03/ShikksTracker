@@ -24,6 +24,7 @@ import type { IContact } from "@/models/Contact";
 import type { ICampaign } from "@/models/Campaign";
 import { randomUUID } from "crypto";
 import { checkReplies } from "@/lib/replies";
+import { applyPlaceholders } from "@/lib/compose";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -314,10 +315,16 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       }
     }
 
+    // Placeholder substitution at send time — case-insensitive and
+    // path-independent (fills {{businessName}}/{{contactName}} regardless of
+    // how the log was created: batch compose, single compose, or AI draft).
+    subjectToSend = applyPlaceholders(subjectToSend, contact);
+    const bodyToSend = applyPlaceholders(log.body, contact);
+
     // Tracking IDs (not persisted until post-send update so failed sends retry cleanly)
     const trackingPixelId = randomUUID();
-    const { links } = extractAndRewriteLinks(log.body);
-    const htmlBody = renderTrackedHtml(log.body, links, trackingPixelId);
+    const { links } = extractAndRewriteLinks(bodyToSend);
+    const htmlBody = renderTrackedHtml(bodyToSend, links, trackingPixelId);
 
     // Send
     const { messageId, threadId: returnedThreadId } = await sendGmailMessage({
@@ -332,10 +339,13 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     const sentAt = new Date();
     const rfcMessageId = await fetchRfcMessageId(messageId);
 
-    // Update EmailLog
+    // Update EmailLog — persist the substituted subject/body so the sent
+    // record is an accurate audit trail of what actually went out.
     await EmailLog.findByIdAndUpdate(log._id, {
       status: "sent",
       sentAt,
+      subject: subjectToSend,
+      body: bodyToSend,
       gmailMessageId: messageId,
       gmailThreadId: returnedThreadId,
       rfcMessageId,
