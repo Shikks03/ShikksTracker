@@ -66,6 +66,8 @@ GOOGLE_REFRESH_TOKEN=
 ANTHROPIC_API_KEY=
 APP_BASE_URL=            # tracking pixel, click redirects, alert links
 CRON_SECRET=             # protects the sequence-engine endpoint
+DASHBOARD_PASSWORD=      # required — /login password; app fails closed (503) if unset
+# ALLOW_OAUTH_BOOTSTRAP=true  # temporarily enables /api/auth/gmail outside development
 
 # Later, if the takeover alert is upgraded beyond email:
 NTFY_TOPIC_URL=
@@ -200,8 +202,15 @@ persist sent state + rfcMessageId → advance contact stage/pipeline/nextSendAt
 
 ## Known constraints & gotchas
 
-- **Nothing but cron/test routes has auth.** Do not deploy publicly before
-  IMPLEMENTATION_PLAN Phase 1. This is the #1 audit finding.
+- ~~Nothing but cron/test routes has auth~~ **RESOLVED 2026-07-08** (branch
+  `security-phase-1`): app-level password auth landed — `src/proxy.ts` (Next 16 renamed
+  `middleware.ts` → `proxy.ts`) guards all pages/APIs except `/api/track/*`,
+  `/api/cron/*`, `/api/test/*`, `/api/health`, `/login`, `/api/auth/login`, static.
+  Session = 30-day HMAC cookie (`src/lib/session.ts`, edge-safe Web Crypto) keyed by
+  `DASHBOARD_PASSWORD`; fails closed with 503 if the var is unset — **local dev now
+  requires `DASHBOARD_PASSWORD` in `.env.local` too.** Task 1.3 hardening also landed
+  (regex escape, campaign/suppression input validation, timing-safe cron compare,
+  health 503 redaction, OAuth bootstrap 404 outside dev unless `ALLOW_OAUTH_BOOTSTRAP`).
 - **`maxDuration = 300`** on cron routes assumes the Vercel plan honors it; CLAUDE.md
   says Hobby — unresolved contradiction (GAPS open question Q1/Q5). The engine sleeps
   30–60 s between sends *inside* the function.

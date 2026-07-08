@@ -11,7 +11,7 @@ against code. No changes were made to source files.
 
 | # | Gap | Area |
 |---|-----|------|
-| 1 | No authentication on dashboard or mutating API routes | Security |
+| 1 | ~~No authentication on dashboard or mutating API routes~~ **RESOLVED 2026-07-08** (Plan Tasks 1.2–1.4, branch `security-phase-1`) | Security |
 | 2 | Non-atomic send: Gmail success + DB failure ⇒ duplicate sends | Correctness |
 | 3 | Opt-out keyword false positives (`\bstop\b`) wrongly unsubscribe engaged leads | Correctness / Compliance |
 | 4 | Suppression list is NOT checked at send time | Compliance |
@@ -74,7 +74,14 @@ urgent.
 
 ## 1. Security
 
-### 1.1 No authentication on dashboard or mutating APIs — CRITICAL, gates deployment
+### 1.1 No authentication on dashboard or mutating APIs — RESOLVED 2026-07-08
+
+> Fixed on branch `security-phase-1` per IMPLEMENTATION_PLAN Tasks 1.2–1.4: DASHBOARD_PASSWORD
+> + `src/proxy.ts` middleware + `/login` (HMAC session cookie, fail-closed), API hardening
+> (1.2/1.3/1.5 items below), docs updated. Functionally verified: unauthenticated `/` → 307
+> `/login`, APIs → 401, tracking/cron/health remain public, tampered cookie rejected.
+> Items 1.2–1.6 below are likewise addressed except where noted (rate limiting on tracking
+> endpoints was explicitly out of scope; OAuth `state` param moot — routes 404 in production).
 - **What:** Every route except `/api/cron/*` and `/api/test/*` is completely open. There
   is no login, no session, no middleware. Anyone who discovers the URL can:
   - `POST /api/send-batch` — **send real email from the owner's Gmail** (any approved log);

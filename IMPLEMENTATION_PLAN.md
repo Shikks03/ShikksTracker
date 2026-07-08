@@ -38,7 +38,16 @@ Dependency chain in one line:
   with the working-tree fixes above, plus `GAPS.md` / `IMPLEMENTATION_PLAN.md` /
   `CLAUDE.md` / `docs/design-brief.md`.
 
-## Phase 1 — Authentication (G-1.1) — BLOCKS DEPLOYMENT
+## Phase 1 — Authentication (G-1.1) — BLOCKS DEPLOYMENT — ✅ DONE 2026-07-08
+
+> Completed on branch `security-phase-1` (commits d1e82ea, df821de, 0172f69, 40fb22f).
+> Task 1.1 decision: app-level auth (default path). Note: Next.js 16 renamed
+> `middleware.ts` → `proxy.ts`, so the middleware lives at `src/proxy.ts`.
+> Verified: tsc + build clean; live checks — `/` → 307 `/login`, `POST /api/send-batch`
+> → 401, `/api/track/open/x` → 200 PNG, cron route reaches `requireCronSecret`,
+> login sets HttpOnly/Secure/Lax cookie, tampered cookie → 401, fail-closed 503 without
+> `DASHBOARD_PASSWORD`. Remaining from Task 1.4: the MANUAL user-side checklist in
+> CLAUDE.md (OAuth publish status, Vercel Sensitive flags, Atlas scoping, spend caps).
 
 ### Task 1.1 — Decide mechanism (needs one user answer, then proceed)
 GAPS.md open question Q2: if the user is happy with platform-level protection (Vercel
