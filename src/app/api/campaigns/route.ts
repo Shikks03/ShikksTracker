@@ -55,8 +55,11 @@ export async function POST(request: NextRequest) {
       offerSummary: body.offerSummary.trim(),
     };
 
-    if (body.toneNotes !== undefined) {
-      payload.toneNotes = typeof body.toneNotes === "string" ? body.toneNotes : String(body.toneNotes);
+    if (body.toneNotes !== undefined && body.toneNotes !== null) {
+      if (typeof body.toneNotes !== "string") {
+        return NextResponse.json({ error: "toneNotes must be a string" }, { status: 400 });
+      }
+      payload.toneNotes = body.toneNotes;
     }
 
     if (body.sequenceSpacingDays !== undefined) {
