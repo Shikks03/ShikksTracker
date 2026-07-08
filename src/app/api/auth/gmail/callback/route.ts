@@ -4,6 +4,15 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  // This endpoint is part of the one-time dev OAuth bootstrap flow.
+  // Disable it in production to prevent unintended OAuth flows.
+  if (
+    process.env.NODE_ENV !== "development" &&
+    process.env.ALLOW_OAUTH_BOOTSTRAP !== "true"
+  ) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const appBaseUrl = process.env.APP_BASE_URL;

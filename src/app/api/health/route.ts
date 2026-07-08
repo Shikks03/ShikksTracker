@@ -13,8 +13,7 @@ export async function GET() {
   try {
     await connectDB();
     return NextResponse.json({ ok: true, db: "connected" });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ ok: true, db: "error", error: message });
+  } catch {
+    return NextResponse.json({ ok: false, db: "error" }, { status: 503 });
   }
 }
