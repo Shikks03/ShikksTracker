@@ -27,9 +27,12 @@ Open `.env.local` and fill in at minimum:
 
 ```
 MONGODB_URI=mongodb+srv://...
+DASHBOARD_PASSWORD=<choose a strong password>
 ```
 
 Then set up Gmail OAuth (see `docs/gmail-setup.md`) to populate `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN`, and add your `ANTHROPIC_API_KEY`.
+
+The dashboard is password-protected. The first visit (and any unauthenticated request) redirects to `/login`; supply `DASHBOARD_PASSWORD` to proceed. If `DASHBOARD_PASSWORD` is not set the app returns 503 to all dashboard routes.
 
 ```powershell
 npm run dev

@@ -8,8 +8,8 @@ End-to-end checklist for going live. Work through the steps in order — each se
 
 1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and create a free account (or log in).
 2. Create a new **free (M0) cluster**. Region does not matter for a single-user tool; Singapore is a reasonable choice.
-3. Under **Security → Database Access**, create a database user with a strong password and the **Read and write to any database** role.
-4. Under **Security → Network Access**, click **Add IP Address → Allow Access from Anywhere** (adds `0.0.0.0/0`). Vercel's outbound IPs are not fixed, so this is required on the free tier.
+3. Under **Security → Database Access**, create a database user with a strong, unique password. Assign the built-in role **readWrite** scoped to your app database only (select "Restrict access to specific databases" and enter the same `<dbname>` you use in the connection string, e.g. `shikkstracker`). Do **not** use the "Read and write to any database" cluster-wide role.
+4. Under **Security → Network Access**, click **Add IP Address → Allow Access from Anywhere** (adds `0.0.0.0/0`). Vercel's outbound IPs are not fixed, so this is required on the free tier. Compensate by using a long, unique database password (see step 3).
 5. Under **Deployment → Database**, click **Connect → Drivers** and copy the connection string. Replace `<password>` with your database user's password. The string looks like:
    ```
    mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/<dbname>?retryWrites=true&w=majority
@@ -34,9 +34,12 @@ End-to-end checklist for going live. Work through the steps in order — each se
    | `ANTHROPIC_API_KEY` | From [console.anthropic.com](https://console.anthropic.com) |
    | `APP_BASE_URL` | Your production URL, e.g. `https://shikkstracker.vercel.app` (no trailing slash) |
    | `CRON_SECRET` | A long random string — keep this secret; it protects the sequence engine endpoint |
+   | `DASHBOARD_PASSWORD` | A strong password for the dashboard login page (required — the app returns 503 if unset) |
    | `NTFY_TOPIC_URL` | Optional — leave blank unless you want ntfy alerts |
    | `TELEGRAM_BOT_TOKEN` | Optional — leave blank unless you want Telegram alerts |
    | `TELEGRAM_CHAT_ID` | Optional — leave blank unless you want Telegram alerts |
+
+   **Sensitive variables:** Mark `MONGODB_URI`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `ANTHROPIC_API_KEY`, `CRON_SECRET`, and `DASHBOARD_PASSWORD` as **Sensitive** in the Vercel dashboard (the eye-slash icon — makes them write-only so they cannot be read back) and scope them to **Production** only. `GOOGLE_CLIENT_ID` and `APP_BASE_URL` are not secret and can remain readable.
 
    Optional tuning variables (defaults are safe to omit initially):
 
@@ -52,6 +55,8 @@ End-to-end checklist for going live. Work through the steps in order — each se
 
 5. Click **Deploy**.
 6. **Note:** Vercel applies environment variable changes only after a redeploy. If you add or update a variable later, trigger a redeploy from the Vercel dashboard (Deployments → Redeploy).
+
+> **Full secrets checklist** (OAuth publishing status, key scoping, spend caps, and rotation runbook): see `CLAUDE.md` § *Secrets & Deployment Security Checklist*.
 
 ---
 
@@ -75,6 +80,8 @@ Full Gmail OAuth instructions: `docs/gmail-setup.md`.
 
 Run these from PowerShell after the first deploy. Replace `<domain>` and `<secret>` with your values.
 
+Opening `https://<domain>` in a browser will redirect to `/login` — enter `DASHBOARD_PASSWORD` to access the dashboard.
+
 **Health check — confirm DB is connected:**
 
 ```powershell
@@ -82,6 +89,8 @@ Invoke-WebRequest -Uri "https://<domain>/api/health" | Select-Object -ExpandProp
 ```
 
 Expected response: `{"ok":true,"db":"connected"}`
+
+If the database is unreachable the response is `{"ok":false,"db":"error"}` with HTTP 503.
 
 **Test send — sends an email to yourself:**
 

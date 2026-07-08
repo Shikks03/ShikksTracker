@@ -81,6 +81,8 @@ npm run dev
 
 ## Step 7 — Run the OAuth Flow
 
+> **Local development only.** The `/api/auth/gmail` bootstrap routes are intended to be run locally. In production they return 404 unless the environment variable `ALLOW_OAUTH_BOOTSTRAP=true` is set temporarily. Never leave that variable set in a permanent deployment — remove it (or set it to any other value) and redeploy once you have the refresh token.
+
 1. Open your browser and navigate to:
    ```
    http://localhost:3000/api/auth/gmail
