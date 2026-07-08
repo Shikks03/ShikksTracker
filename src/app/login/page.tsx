@@ -20,12 +20,20 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false);
   const [from, setFrom]         = useState("/");
 
-  // Read ?from= redirect param once on mount
+  // Read ?from= redirect param once on mount.
+  // Resolve against our own origin and re-check it — string checks alone are not
+  // enough (browsers normalize "/\evil.com" and "//evil.com" to external URLs).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const f = params.get("from");
-    if (f && f.startsWith("/") && !f.startsWith("//")) {
-      setFrom(f);
+    if (!f || !f.startsWith("/")) return;
+    try {
+      const resolved = new URL(f, window.location.origin);
+      if (resolved.origin === window.location.origin) {
+        setFrom(resolved.pathname + resolved.search);
+      }
+    } catch {
+      // malformed value — keep the "/" default
     }
   }, []);
 
