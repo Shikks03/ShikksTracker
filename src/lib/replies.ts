@@ -1,21 +1,18 @@
 /**
- * Reply detection — Phases 9 + 12
+ * Reply detection — Phase 9
  *
  * checkReplies() is called as the first step of every sequence-engine run.
  * It:
  *   1. Polls Gmail threads for replies from active contacts.
  *   2. Detects opt-out keywords in the reply body (stripping quoted text first).
  *   3. Applies state transitions (contact status, EmailLog updates, Suppression upsert).
- *   4. Queues normal-reply contacts for email-to-self takeover alerts (Phase 12).
- *   5. After ALL state transitions, sends the queued takeover alerts.
  */
 
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
-import { getGmailClient, getSenderAddress, sendGmailMessage } from "@/lib/gmail";
+import { getGmailClient } from "@/lib/gmail";
 import { bumpEngagement, SCORE_REPLY } from "@/lib/scoring";
-import { htmlEscape } from "@/lib/tracking";
 import type { Types } from "mongoose";
 
 // ---------------------------------------------------------------------------
@@ -27,17 +24,6 @@ export interface RepliesResult {
   replied: number;
   unsubscribed: number;
   errors: string[];
-}
-
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
-interface TakeoverItem {
-  contactId: Types.ObjectId;
-  businessName: string;
-  contactEmail: string;
-  stage: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +76,20 @@ function isOptOut(text: string): boolean {
   return OPT_OUT_PATTERNS.some((re) => re.test(clean));
 }
 
+/**
+ * Gmail emoji reactions (💖, 👍, …) are delivered as ordinary thread messages
+ * whose From is the reacting contact — so they look exactly like replies. They
+ * carry a distinctive marker: a link with `utm_campaign=emojireactionemail` and
+ * the phrase "reacted via Gmail". Detect and skip them, otherwise a reaction
+ * pre-empts (and masks) the real reply and wrongly flips the contact to replied.
+ */
+function isGmailReaction(body: string): boolean {
+  return (
+    /utm_campaign=emojireactionemail/i.test(body) ||
+    /\breacted via\s+gmail\b/i.test(body)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Gmail payload helpers
 // ---------------------------------------------------------------------------
@@ -128,10 +128,6 @@ export async function checkReplies(): Promise<RepliesResult> {
     unsubscribed: 0,
     errors: [],
   };
-
-  // Queue of contacts with normal (non-opt-out) replies that need alerts.
-  // We send alerts AFTER all state transitions to avoid interleaving.
-  const takeoverQueue: TakeoverItem[] = [];
 
   const gmail = getGmailClient();
 
@@ -179,9 +175,13 @@ export async function checkReplies(): Promise<RepliesResult> {
       const sentAtMs = lastSentLog.sentAt ? lastSentLog.sentAt.getTime() : 0;
       const contactEmailLower = contact.contactEmail.toLowerCase();
 
-      // Find the first reply message from the contact after our last send
+      // Find the first GENUINE reply from the contact after our last send.
+      // Gmail emoji reactions arrive as thread messages from the contact too, so
+      // we fetch each candidate and skip reactions — otherwise a 👍 pre-empts and
+      // masks the real reply. The fetched body is reused for opt-out detection.
       let replyMessageId: string | null = null;
       let replyInternalDateMs = 0;
+      let bodyText = "";
 
       for (const msg of messages) {
         if (!msg.id || !msg.internalDate) continue;
@@ -194,36 +194,33 @@ export async function checkReplies(): Promise<RepliesResult> {
           msg.payload?.headers
             ?.find((h) => h.name?.toLowerCase() === "from")
             ?.value?.toLowerCase() ?? "";
+        if (!fromHeader.includes(contactEmailLower)) continue;
 
-        if (fromHeader.includes(contactEmailLower)) {
-          replyMessageId = msg.id;
-          replyInternalDateMs = internalDateMs;
-          break; // first qualifying reply is enough
-        }
+        // Fetch the full message so we can (a) skip Gmail reactions and
+        // (b) reuse the body for opt-out detection below.
+        const { data: candidate } = await gmail.users.messages.get({
+          userId: "me",
+          id: msg.id,
+          format: "full",
+        });
+
+        const candidateBody = candidate.payload
+          ? extractPlainText(candidate.payload as GmailMessagePart) ??
+            candidate.snippet ??
+            ""
+          : candidate.snippet ?? "";
+
+        if (isGmailReaction(candidateBody)) continue; // reaction, not a reply
+
+        replyMessageId = msg.id;
+        replyInternalDateMs = internalDateMs;
+        bodyText = candidateBody;
+        break; // first genuine reply is enough
       }
 
       if (!replyMessageId) {
-        // No reply found for this contact
+        // No genuine reply found for this contact
         continue;
-      }
-
-      // ---------------------------------------------------------------------------
-      // Fetch the reply message body (full) for opt-out detection
-      // ---------------------------------------------------------------------------
-
-      const { data: replyMsg } = await gmail.users.messages.get({
-        userId: "me",
-        id: replyMessageId,
-        format: "full",
-      });
-
-      // Extract body text: prefer text/plain from payload, fall back to snippet
-      let bodyText = "";
-      if (replyMsg.payload) {
-        const plain = extractPlainText(replyMsg.payload as GmailMessagePart);
-        bodyText = plain ?? replyMsg.snippet ?? "";
-      } else {
-        bodyText = replyMsg.snippet ?? "";
       }
 
       const optOut = isOptOut(bodyText);
@@ -293,59 +290,11 @@ export async function checkReplies(): Promise<RepliesResult> {
           status: { $in: ["draft", "approved"] },
         });
 
-        // 5. Queue for takeover alert (sent after all contacts processed)
-        takeoverQueue.push({
-          contactId: contact._id as Types.ObjectId,
-          businessName: contact.businessName,
-          contactEmail: contact.contactEmail,
-          stage: lastSentLog.stage,
-        });
-
         result.replied++;
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Contact ${String(contact._id)}: ${msg}`);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Phase 12: Takeover alerts — sent AFTER all state transitions
-  // ---------------------------------------------------------------------------
-
-  if (takeoverQueue.length > 0) {
-    const appBaseUrl = process.env.APP_BASE_URL ?? "";
-    let senderAddress: string;
-
-    try {
-      senderAddress = await getSenderAddress(gmail);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`Takeover alerts: could not resolve sender address: ${msg}`);
-      return result;
-    }
-
-    for (const item of takeoverQueue) {
-      try {
-        // businessName/contactEmail originate from CSV imports — escape before
-        // embedding in the alert HTML so a hostile source list can't inject markup.
-        const contactUrl = encodeURI(`${appBaseUrl}/contacts/${String(item.contactId)}`);
-        const htmlBody = `
-<p><strong>${htmlEscape(item.businessName)}</strong> (${htmlEscape(item.contactEmail)}) replied to stage ${item.stage}.</p>
-<p><a href="${contactUrl}">Open contact</a></p>
-`.trim();
-
-        await sendGmailMessage({
-          to: senderAddress,
-          subject: `Reply from ${item.businessName}`,
-          htmlBody,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        result.errors.push(
-          `Takeover alert for contact ${String(item.contactId)}: ${msg}`
-        );
-      }
     }
   }
 
