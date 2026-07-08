@@ -34,8 +34,10 @@ export interface RepliesResult {
  * Strips quoted lines (lines starting with ">") and everything from a line
  * matching "On ... wrote:" onward. This prevents false-positive opt-outs
  * from our own footer copy ("just reply STOP") appearing in the quoted block.
+ *
+ * Exported for unit tests only — treat as internal.
  */
-function stripQuotedText(text: string): string {
+export function stripQuotedText(text: string): string {
   const lines = text.split("\n");
   const result: string[] = [];
 
@@ -58,8 +60,10 @@ function stripQuotedText(text: string): string {
  * Derives a single-line snippet from cleaned reply text:
  * collapses all whitespace/newlines to single spaces, trims, truncates to
  * 80 chars with a "…" suffix if longer. Returns null when the result is empty.
+ *
+ * Exported for unit tests only — treat as internal.
  */
-function makeSnippet(text: string): string | null {
+export function makeSnippet(text: string): string | null {
   const collapsed = text.replace(/\s+/g, " ").trim();
   if (!collapsed) return null;
   return collapsed.length > 80 ? collapsed.slice(0, 80) + "…" : collapsed;
@@ -71,7 +75,8 @@ const OPT_OUT_PATTERNS = [
   /\bopt[ -]?out\b/i,
 ];
 
-function isOptOut(text: string): boolean {
+/** Exported for unit tests only — treat as internal. */
+export function isOptOut(text: string): boolean {
   const clean = stripQuotedText(text);
   return OPT_OUT_PATTERNS.some((re) => re.test(clean));
 }
@@ -82,8 +87,10 @@ function isOptOut(text: string): boolean {
  * carry a distinctive marker: a link with `utm_campaign=emojireactionemail` and
  * the phrase "reacted via Gmail". Detect and skip them, otherwise a reaction
  * pre-empts (and masks) the real reply and wrongly flips the contact to replied.
+ *
+ * Exported for unit tests only — treat as internal.
  */
-function isGmailReaction(body: string): boolean {
+export function isGmailReaction(body: string): boolean {
   return (
     /utm_campaign=emojireactionemail/i.test(body) ||
     /\breacted via\s+gmail\b/i.test(body)
