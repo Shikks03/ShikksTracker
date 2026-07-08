@@ -43,3 +43,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local tooling binaries (cloudflared.exe for tunnel testing — never commit binaries)
+/tools/
+
+# generated knowledge-graph output (rebuildable via /graphify)
+/graphify-out/
+
+# GSD planning workspace state (generated graphs/config)
+/.planning/
+
+# design handoff assets (screenshots + HTML mockups, ~2 MB).
+# SESSION_NOTES calls this the visual source of truth — delete this line
+# if you decide it should be versioned with the repo.
+/design reference/

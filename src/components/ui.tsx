@@ -155,6 +155,9 @@ export function HotChip({ className = "" }: { className?: string }) {
     <span
       className={className}
       style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
         fontFamily: mono,
         fontSize: 10.5,
         textTransform: "uppercase",
@@ -169,6 +172,26 @@ export function HotChip({ className = "" }: { className?: string }) {
       }}
     >
       HOT
+      <span
+        title="+1 open · +3 click · +10 reply → score ≥ 5 = HOT"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 11,
+          height: 11,
+          borderRadius: "50%",
+          border: "1px solid #C9A040",
+          fontSize: 8,
+          lineHeight: 1,
+          cursor: "help",
+          flexShrink: 0,
+          letterSpacing: 0,
+          textTransform: "none",
+        }}
+      >
+        ?
+      </span>
     </span>
   );
 }
