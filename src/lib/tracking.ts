@@ -4,9 +4,10 @@
  * Design constraints:
  *   - No new npm packages. Uses Node built-in `crypto.randomUUID()`.
  *   - Bodies are stored as PLAIN TEXT; URLs appear as bare text (https://…).
- *   - Replicates the paragraph/line-break logic of `bodyToHtml` from draft.ts,
- *     but tokenises each line into url/non-url segments first so that inserted
- *     <a> anchors are never double-escaped.
+ *   - This is the single plain-text → HTML renderer for the app. Call with
+ *     `(body, [], null)` for the untracked representation (formerly the separate
+ *     `bodyToHtml` in draft.ts, removed Task 5.4). It tokenises each line into
+ *     url/non-url segments so that inserted <a> anchors are never double-escaped.
  */
 
 import { randomUUID } from "crypto";
@@ -90,7 +91,7 @@ export function extractAndRewriteLinks(body: string): { links: TrackingLink[] } 
  * Converts a plain-text email body to HTML, replacing URLs with tracking
  * anchor tags and optionally appending a 1×1 tracking pixel.
  *
- * Paragraph + line-break logic mirrors `bodyToHtml` from draft.ts:
+ * Paragraph + line-break logic:
  *   - Double newlines → `<p>…</p>` paragraph breaks.
  *   - Single newlines within a paragraph → `<br>`.
  *

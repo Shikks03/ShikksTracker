@@ -41,6 +41,8 @@ export interface IEmailLog extends Document {
   sendErrorCount: number;
   /** Error message from the most recent failed send attempt. */
   lastSendError: string | null;
+  /** Set by Mongoose `timestamps` on insert. Enables draft-age display and reliable ordering (previously ordering relied on _id). */
+  createdAt: Date;
 }
 
 const LinkSchema = new Schema<IEmailLogLink>(
@@ -79,6 +81,11 @@ const EmailLogSchema = new Schema<IEmailLog>({
   sendAttemptedAt: { type: Date, default: null },
   sendErrorCount: { type: Number, default: 0 },
   lastSendError: { type: String, default: null },
+}, {
+  // createdAt only — matches Contact/Campaign convention. Existing docs simply
+  // lack the field (fine). No updatedAt: EmailLog mutates constantly (tracking
+  // counters) and an updatedAt would carry no useful meaning here.
+  timestamps: { createdAt: true, updatedAt: false },
 });
 
 // Contact/Campaign list queries

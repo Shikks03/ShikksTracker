@@ -153,41 +153,7 @@ export async function generateEmailDraft(
   return { subject, body };
 }
 
-// ---------------------------------------------------------------------------
-// Plain-text → HTML helper
-// ---------------------------------------------------------------------------
-
-/** HTML-escape a raw string (no XSS risk in generated bodies). */
-function htmlEscape(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-/**
- * Converts a plain-text email body to a minimal HTML representation.
- *
- * - Double newlines become paragraph breaks (`<p>…</p>`).
- * - Single newlines within a paragraph become `<br>`.
- * - All text is HTML-escaped.
- *
- * The sequence engine uses this at send time; drafts are stored as plain text.
- */
-export function bodyToHtml(body: string): string {
-  // Normalise Windows-style line endings
-  const normalised = body.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-  const paragraphs = normalised
-    .split(/\n\n+/)
-    .map((para) => {
-      const escaped = htmlEscape(para.trim());
-      // Single newlines → <br>
-      return `<p>${escaped.replace(/\n/g, "<br>")}</p>`;
-    })
-    .filter((p) => p !== "<p></p>");
-
-  return paragraphs.join("\n");
-}
+// Plain-text → HTML rendering lives in tracking.ts (`renderTrackedHtml`).
+// Call `renderTrackedHtml(body, [], null)` for the untracked HTML representation
+// that this module previously exposed as `bodyToHtml` (removed 2026-07-11,
+// Task 5.4 — the two implementations were duplicated and would drift).

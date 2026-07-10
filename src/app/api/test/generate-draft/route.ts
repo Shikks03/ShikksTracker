@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
 import { handleError } from "@/lib/api";
 import { connectDB } from "@/lib/db";
-import { generateEmailDraft, bodyToHtml, DraftInput } from "@/lib/draft";
+import { generateEmailDraft, DraftInput } from "@/lib/draft";
+import { renderTrackedHtml } from "@/lib/tracking";
 import Contact from "@/models/Contact";
 import Campaign from "@/models/Campaign";
 import EmailLog from "@/models/EmailLog";
@@ -143,7 +144,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       subject,
       body: plainBody,
-      html: bodyToHtml(plainBody),
+      // Untracked HTML preview (no links rewritten, no pixel) — same output the
+      // former bodyToHtml produced. See tracking.ts renderTrackedHtml.
+      html: renderTrackedHtml(plainBody, [], null),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

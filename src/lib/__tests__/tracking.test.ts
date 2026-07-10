@@ -284,4 +284,26 @@ describe("renderTrackedHtml", () => {
       '<a href="https://app.example.com/api/track/click/t-bar">https://bar.com</a>'
     );
   });
+
+  // --- Untracked rendering (formerly draft.ts bodyToHtml, removed Task 5.4) ---
+  // renderTrackedHtml(body, [], null) is now the single paragraph/escape path.
+
+  it("returns empty string for empty input", () => {
+    expect(renderTrackedHtml("", [], null)).toBe("");
+  });
+
+  it("returns empty string for whitespace-only input", () => {
+    expect(renderTrackedHtml("   \n\n   ", [], null)).toBe("");
+  });
+
+  it("escapes single-quote in body text", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    expect(renderTrackedHtml("it's fine", [], null)).toBe("<p>it&#39;s fine</p>");
+  });
+
+  it("does not produce empty <p></p> for trailing newlines", () => {
+    const html = renderTrackedHtml("Hello\n\n", [], null);
+    expect(html).not.toContain("<p></p>");
+    expect(html).toBe("<p>Hello</p>");
+  });
 });
