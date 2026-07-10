@@ -14,6 +14,7 @@ import {
   isWithinSendWindow,
   getManilaDayStart,
   computeNextSendAt,
+  isStaleSending,
 } from "@/lib/sequence";
 
 afterEach(() => {
@@ -187,5 +188,55 @@ describe("computeNextSendAt", () => {
     const result = computeNextSendAt(firstSentAt, [0, 7, 14], 3);
     // firstSentAt + 14 days = 2026-07-15
     expect(result.toISOString()).toBe("2026-07-15T00:00:00.000Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isStaleSending
+// ---------------------------------------------------------------------------
+
+describe("isStaleSending", () => {
+  const THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes, matches STALE_SENDING_THRESHOLD_MS
+
+  it("returns false when sendAttemptedAt is null", () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    expect(isStaleSending(null, now)).toBe(false);
+  });
+
+  it("returns false when elapsed time is exactly equal to the threshold", () => {
+    // Boundary: elapsed === threshold is NOT stale (strictly greater-than)
+    const now = new Date("2026-07-04T12:10:00Z");
+    const sendAttemptedAt = new Date(now.getTime() - THRESHOLD_MS);
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(false);
+  });
+
+  it("returns false when elapsed time is just under the threshold", () => {
+    const now = new Date("2026-07-04T12:10:00Z");
+    const sendAttemptedAt = new Date(now.getTime() - THRESHOLD_MS + 1);
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(false);
+  });
+
+  it("returns true when elapsed time is just over the threshold", () => {
+    const now = new Date("2026-07-04T12:10:00Z");
+    const sendAttemptedAt = new Date(now.getTime() - THRESHOLD_MS - 1);
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(true);
+  });
+
+  it("returns true for a log that has been sending for 15 minutes", () => {
+    const now = new Date("2026-07-04T12:15:00Z");
+    const sendAttemptedAt = new Date("2026-07-04T12:00:00Z");
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(true);
+  });
+
+  it("returns false for a log that has been sending for 5 minutes", () => {
+    const now = new Date("2026-07-04T12:05:00Z");
+    const sendAttemptedAt = new Date("2026-07-04T12:00:00Z");
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(false);
+  });
+
+  it("returns true for a log that has been sending for over an hour (very stale)", () => {
+    const now = new Date("2026-07-04T13:00:00Z");
+    const sendAttemptedAt = new Date("2026-07-04T11:00:00Z");
+    expect(isStaleSending(sendAttemptedAt, now)).toBe(true);
   });
 });

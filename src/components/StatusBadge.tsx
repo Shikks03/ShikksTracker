@@ -8,6 +8,7 @@ const COLOR_MAP: Record<string, string> = {
   unsubscribed: "bg-gray-100 text-gray-600",
   draft: "bg-gray-100 text-gray-700",
   approved: "bg-yellow-100 text-yellow-800",
+  sending: "bg-blue-100 text-blue-700",
   sent: "bg-green-100 text-green-800",
 };
 

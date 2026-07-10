@@ -40,10 +40,13 @@ export async function PATCH(
     const log = await EmailLog.findById(id);
     if (!log) return notFound(id);
 
-    // Blanket guard: nothing may touch a sent log
-    if (log.status === "sent") {
+    // Blanket guard: "sent" and "sending" logs are immutable.
+    // "sending" means a Gmail send is in-flight — editing it would corrupt the audit trail
+    // or race with the send. If the log is stuck in "sending", the stale-send sweep will
+    // revert it to "draft" after 10 minutes so normal editing can resume.
+    if (log.status === "sent" || log.status === "sending") {
       return NextResponse.json(
-        { error: "Cannot modify a sent email log." },
+        { error: `Cannot modify a ${log.status} email log.` },
         { status: 409 }
       );
     }

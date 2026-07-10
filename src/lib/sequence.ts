@@ -49,8 +49,40 @@ const SEND_WINDOW_TIMEZONE = "Asia/Manila";
 const RUN_TIME_BUDGET_MS = 240_000;
 
 // ---------------------------------------------------------------------------
+// Stale-send sweep constants
+// ---------------------------------------------------------------------------
+
+/**
+ * A log that has been in "sending" for longer than this is considered stale
+ * (process likely died after Gmail returned but before the DB update completed,
+ * OR the Gmail call itself timed out). Stale logs are reverted to "draft" so
+ * a human can re-approve after verifying in the Gmail Sent folder.
+ *
+ * 10 minutes is intentionally conservative: a normal send + post-send DB writes
+ * completes in a few seconds; the 30–90 s inter-send sleep happens AFTER the
+ * log is already marked "sent", so it cannot inflate this window.
+ */
+const STALE_SENDING_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
+// ---------------------------------------------------------------------------
 // Exported pure helpers (unit-testable, no DB)
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a log in "sending" state should be treated as stale.
+ *
+ * A log is stale when sendAttemptedAt is non-null and the elapsed time
+ * since the claim exceeds STALE_SENDING_THRESHOLD_MS.
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function isStaleSending(
+  sendAttemptedAt: Date | null,
+  now: Date
+): boolean {
+  if (!sendAttemptedAt) return false;
+  return now.getTime() - sendAttemptedAt.getTime() > STALE_SENDING_THRESHOLD_MS;
+}
 
 /**
  * Returns the local hour (0-23) in Manila time for a given UTC Date.
@@ -164,11 +196,12 @@ async function generateDrafts(): Promise<DraftsResult> {
     try {
       const targetStage = (contact.currentStage + 1) as 1 | 2 | 3;
 
-      // Idempotency: skip if a log already exists for this contact+stage
+      // Idempotency: skip if a log already exists for this contact+stage.
+      // "sending" is included: a log currently mid-send must not be replaced.
       const existing = await EmailLog.findOne({
         contactId: contact._id,
         stage: targetStage,
-        status: { $in: ["draft", "approved", "sent"] },
+        status: { $in: ["draft", "approved", "sending", "sent"] },
       }).lean();
 
       if (existing) continue;
@@ -244,15 +277,45 @@ export interface SendOneLogResult {
  * post-send EmailLog/Contact updates. Called by both the sequence engine
  * and the manual send-batch API.
  *
- * Reverts the log to "draft" if the contact is inactive or the campaign
- * is missing, so it doesn't linger in the approved queue.
+ * Idempotency: atomically claims the log by transitioning it from "approved"
+ * to "sending" before touching Gmail. If the claim fails (another runner
+ * already claimed it, or the log is no longer "approved"), returns "skipped".
+ *
+ * Failure paths:
+ *   - Contact inactive or missing  → revert to "draft" (won't re-appear in send queue)
+ *   - Campaign missing             → revert to "draft"
+ *   - Gmail send failure           → revert to "approved" + record error fields
+ *   - Gmail success                → update to "sent" with all tracking fields
+ *
+ * No code path may leave the log stuck in "sending" — every branch resolves the state.
  */
 export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
+  // --- Atomic claim: approved → sending ---
+  // findOneAndUpdate with status precondition ensures only one runner claims this log.
+  const now = new Date();
+  const claimed = await EmailLog.findOneAndUpdate(
+    { _id: log._id, status: "approved" },
+    { status: "sending", sendAttemptedAt: now },
+    { new: false } // we don't need the updated doc
+  );
+  if (!claimed) {
+    // Another runner claimed it, or it was already sent/draft/sending
+    return {
+      status: "skipped",
+      contactName: "unknown",
+      subject: log.subject,
+      error: "log no longer approved — skipped (race condition or already claimed)",
+    };
+  }
+
+  // From here on the log is "sending" in the DB. Every exit path MUST resolve the state.
+
   try {
     // Load contact
     const contact = await Contact.findById(log.contactId).lean() as IContact | null;
     if (!contact || contact.status !== "active") {
-      await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+      // Revert to draft — contact is gone or inactive; no point retrying
+      await EmailLog.findByIdAndUpdate(log._id, { status: "draft", sendAttemptedAt: null });
       return {
         status: "skipped",
         contactName: contact?.businessName ?? "unknown",
@@ -264,7 +327,8 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     // Load campaign (needed for sequenceSpacingDays)
     const campaign = await Campaign.findById(log.campaignId).lean() as ICampaign | null;
     if (!campaign) {
-      await EmailLog.findByIdAndUpdate(log._id, { status: "draft" });
+      // Revert to draft — campaign is gone; no point retrying
+      await EmailLog.findByIdAndUpdate(log._id, { status: "draft", sendAttemptedAt: null });
       return {
         status: "skipped",
         contactName: contact.businessName,
@@ -326,15 +390,36 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     const { links } = extractAndRewriteLinks(bodyToSend);
     const htmlBody = renderTrackedHtml(bodyToSend, links, trackingPixelId);
 
-    // Send
-    const { messageId, threadId: returnedThreadId } = await sendGmailMessage({
-      to: contact.contactEmail,
-      subject: subjectToSend,
-      htmlBody,
-      threadId,
-      inReplyTo,
-      references,
-    });
+    // Send — if this throws, we catch below and revert to "approved"
+    let messageId: string;
+    let returnedThreadId: string;
+    try {
+      const sendResult = await sendGmailMessage({
+        to: contact.contactEmail,
+        subject: subjectToSend,
+        htmlBody,
+        threadId,
+        inReplyTo,
+        references,
+      });
+      messageId = sendResult.messageId;
+      returnedThreadId = sendResult.threadId;
+    } catch (gmailErr) {
+      // Gmail failed — revert to "approved" so the user can retry after investigation
+      const errMsg = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
+      await EmailLog.findByIdAndUpdate(log._id, {
+        status: "approved",
+        sendAttemptedAt: null,
+        $inc: { sendErrorCount: 1 },
+        lastSendError: errMsg,
+      });
+      return {
+        status: "failed",
+        contactName: contact.businessName,
+        subject: subjectToSend,
+        error: errMsg,
+      };
+    }
 
     const sentAt = new Date();
     const rfcMessageId = await fetchRfcMessageId(messageId);
@@ -389,7 +474,17 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
 
     return { status: "sent", contactName: contact.businessName, subject: subjectToSend };
   } catch (err) {
+    // Unexpected error after claim — revert to "approved" so the log isn't stuck in "sending"
     const msg = err instanceof Error ? err.message : String(err);
+    await EmailLog.findByIdAndUpdate(log._id, {
+      status: "approved",
+      sendAttemptedAt: null,
+      $inc: { sendErrorCount: 1 },
+      lastSendError: `unexpected error: ${msg}`,
+    }).catch(() => {
+      // Best-effort revert — if this also fails, the stale-send sweep will catch it
+      console.error(`[sequence] CRITICAL: failed to revert log ${String(log._id)} from "sending" to "approved":`, msg);
+    });
     return { status: "failed", contactName: "unknown", subject: log.subject, error: msg };
   }
 }
@@ -460,6 +555,7 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
 // ---------------------------------------------------------------------------
 
 export interface RunSummary {
+  staleSendingReverted: number;
   repliesChecked: number;
   replied: number;
   unsubscribed: number;
@@ -467,6 +563,36 @@ export interface RunSummary {
   sent: number;
   skipped: string[];
   errors: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Stale-send sweep
+// ---------------------------------------------------------------------------
+
+interface StaleSweepResult {
+  reverted: number;
+}
+
+/**
+ * Finds logs stuck in "sending" for longer than STALE_SENDING_THRESHOLD_MS
+ * and reverts them to "draft" so a human can re-approve after verifying
+ * in the Gmail Sent folder. Does NOT auto-revert to "approved" — the send
+ * may or may not have succeeded, so human review is required.
+ */
+async function sweepStaleSendingLogs(): Promise<StaleSweepResult> {
+  const cutoff = new Date(Date.now() - STALE_SENDING_THRESHOLD_MS);
+  const res = await EmailLog.updateMany(
+    {
+      status: "sending",
+      sendAttemptedAt: { $lte: cutoff },
+    },
+    {
+      status: "draft",
+      sendAttemptedAt: null,
+      lastSendError: "interrupted mid-send — verify in Gmail Sent folder before re-approving",
+    }
+  );
+  return { reverted: res.modifiedCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +604,10 @@ export async function runSequenceEngine(): Promise<RunSummary> {
 
   await connectDB();
 
+  // 0: Sweep stale "sending" logs before anything else — clears ambiguous state
+  //    from a previous run that was killed after the Gmail call but before the DB update.
+  const sweepResult = await sweepStaleSendingLogs();
+
   // A: Check replies (Phase 9 stub)
   const repliesResult = await checkReplies();
 
@@ -488,6 +618,7 @@ export async function runSequenceEngine(): Promise<RunSummary> {
   const sendsResult = await sendApproved(runStartMs);
 
   return {
+    staleSendingReverted: sweepResult.reverted,
     repliesChecked: repliesResult.checked,
     replied: repliesResult.replied,
     unsubscribed: repliesResult.unsubscribed,

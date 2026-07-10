@@ -55,11 +55,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const existing = await EmailLog.findOne({
       contactId: contact._id,
       stage,
-      status: { $in: ["approved", "sent"] },
+      // "sending" is included: a log mid-send must not be replaced by a manual compose
+      status: { $in: ["approved", "sending", "sent"] },
     }).lean();
     if (existing) {
       return NextResponse.json(
-        { error: `An approved or sent log already exists for this contact at stage ${stage as number}` },
+        { error: `An approved, sending, or sent log already exists for this contact at stage ${stage as number}` },
         { status: 409 }
       );
     }

@@ -66,7 +66,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const existing = await EmailLog.findOne({
           contactId: contact._id,
           stage,
-          status: { $in: ["approved", "sent"] },
+          // "sending" is included: a log mid-send must not be replaced by a batch compose
+          status: { $in: ["approved", "sending", "sent"] },
         }).lean();
         if (existing) {
           skipped.push({

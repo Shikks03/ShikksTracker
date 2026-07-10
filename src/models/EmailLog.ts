@@ -10,8 +10,12 @@ export interface IEmailLog extends Document {
   campaignId: Types.ObjectId;
   /** 1=initial, 2=followup1, 3=followup2 */
   stage: 1 | 2 | 3;
-  /** Review-gate field: draft → approved → sent */
-  status: "draft" | "approved" | "sent";
+  /**
+   * Review-gate field: draft → approved → sending → sent
+   * "sending" is a transient claim state set atomically before the Gmail call
+   * to prevent duplicate sends if two runners race or if the process dies.
+   */
+  status: "draft" | "approved" | "sending" | "sent";
   subject: string;
   body: string;
   gmailThreadId: string | null;
@@ -31,6 +35,12 @@ export interface IEmailLog extends Document {
   replyBody: string | null;
   /** Single-line preview of replyBody, ≤80 chars. Populated by reply detection (src/lib/replies.ts). */
   replySnippet: string | null;
+  /** UTC timestamp set when status transitions to "sending". Used by the stale-send sweep to detect interrupted sends. */
+  sendAttemptedAt: Date | null;
+  /** Cumulative count of failed send attempts. Incremented on Gmail failure; never reset. */
+  sendErrorCount: number;
+  /** Error message from the most recent failed send attempt. */
+  lastSendError: string | null;
 }
 
 const LinkSchema = new Schema<IEmailLogLink>(
@@ -47,7 +57,7 @@ const EmailLogSchema = new Schema<IEmailLog>({
   stage: { type: Number, enum: [1, 2, 3], required: true },
   status: {
     type: String,
-    enum: ["draft", "approved", "sent"],
+    enum: ["draft", "approved", "sending", "sent"],
     default: "draft",
   },
   subject: { type: String, required: true },
@@ -66,6 +76,9 @@ const EmailLogSchema = new Schema<IEmailLog>({
   repliedAt: { type: Date, default: null },
   replyBody: { type: String, default: null },
   replySnippet: { type: String, default: null },
+  sendAttemptedAt: { type: Date, default: null },
+  sendErrorCount: { type: Number, default: 0 },
+  lastSendError: { type: String, default: null },
 });
 
 // Contact/Campaign list queries
