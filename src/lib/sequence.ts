@@ -11,6 +11,7 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import Campaign from "@/models/Campaign";
 import EmailLog from "@/models/EmailLog";
+import Suppression from "@/models/Suppression";
 import { generateEmailDraft } from "@/lib/draft";
 import { extractAndRewriteLinks, renderTrackedHtml } from "@/lib/tracking";
 import {
@@ -23,6 +24,7 @@ import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
 import type { ICampaign } from "@/models/Campaign";
 import { randomUUID } from "crypto";
+import type { Types } from "mongoose";
 import { checkReplies } from "@/lib/replies";
 import { applyPlaceholders } from "@/lib/compose";
 
@@ -170,6 +172,42 @@ async function fetchRfcMessageId(gmailMessageId: string): Promise<string | null>
 }
 
 // ---------------------------------------------------------------------------
+// Suppression check helper (local — Task 3.4 will consolidate into contacts.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies the "suppressed contact" transition for a contact whose email appears
+ * in the Suppression list:
+ *   - Sets contact status to "unsubscribed" and clears nextSendAt.
+ *   - Deletes all pending draft/approved logs for the contact.
+ *
+ * NOTE: This does NOT delete a log that is currently in "sending" state.
+ * The caller (sendOneLog) is responsible for resolving that log separately
+ * before returning, since it was already claimed with status "sending".
+ *
+ * This helper intentionally mirrors the reply-path's opt-out transition in
+ * replies.ts (Contact update + EmailLog.deleteMany on draft/approved), but
+ * does NOT add a Suppression entry (the entry already exists, that's why we
+ * are here) and does NOT fire a takeover alert (a suppression check is not a
+ * reply; the entry was created by a human or the opt-out path).
+ *
+ * Task 3.4 may extract this into src/lib/contacts.ts as suppressContact().
+ * Keep the seam clean: both call sites in this file call this helper; no
+ * logic is inlined at the call sites beyond the log-specific cleanup needed
+ * by sendOneLog.
+ */
+async function applySuppressionTransition(contactId: Types.ObjectId): Promise<void> {
+  await Contact.findByIdAndUpdate(contactId, {
+    status: "unsubscribed",
+    nextSendAt: null,
+  });
+  await EmailLog.deleteMany({
+    contactId,
+    status: { $in: ["draft", "approved"] },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Phase B: generateDrafts
 // ---------------------------------------------------------------------------
 
@@ -205,6 +243,21 @@ async function generateDrafts(): Promise<DraftsResult> {
       }).lean();
 
       if (existing) continue;
+
+      // Suppression check — before the Claude API call so we don't waste tokens
+      // on a contact that has been manually suppressed since the query ran.
+      // Email equality is safe: both Contact.contactEmail and Suppression.email
+      // are stored lowercase-normalised (lowercase: true in both schemas).
+      const suppressed = await Suppression.findOne({
+        email: contact.contactEmail,
+      }).lean();
+      if (suppressed) {
+        await applySuppressionTransition(contact._id);
+        result.errors.push(
+          `Contact ${String(contact._id)} (${contact.contactEmail}): suppressed — unsubscribed, pending logs deleted, skipped draft`
+        );
+        continue;
+      }
 
       // Load campaign
       const campaign = await Campaign.findById(contact.campaignId).lean() as ICampaign | null;
@@ -331,6 +384,29 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
         contactName: contact?.businessName ?? "unknown",
         subject: log.subject,
         error: "contact not active — reverted to draft",
+      };
+    }
+
+    // Suppression check — after contact load, before Gmail/Claude work.
+    // A contact may have been manually added to the suppression list after their
+    // logs were approved; we must honour this before sending (SPEC §14, PH DPA).
+    // Email equality is safe: both Contact.contactEmail and Suppression.email are
+    // stored lowercase-normalised (lowercase: true in both schemas).
+    const suppressed = await Suppression.findOne({
+      email: contact.contactEmail,
+    }).lean();
+    if (suppressed) {
+      // Apply contact transition (status → unsubscribed, nextSendAt → null,
+      // delete draft/approved logs). The current log is in "sending" and is NOT
+      // covered by the deleteMany (which only touches draft/approved), so we
+      // delete it explicitly — it must never send.
+      await applySuppressionTransition(contact._id);
+      await EmailLog.findByIdAndDelete(log._id);
+      return {
+        status: "skipped",
+        contactName: contact.businessName,
+        subject: log.subject,
+        error: "contact email is suppressed — unsubscribed, log deleted",
       };
     }
 
