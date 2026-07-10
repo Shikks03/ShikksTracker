@@ -3,16 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, MonoLabel, Panel } from "@/components/ui";
-
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-
-const INK    = "#1A1712";
-const FAINT  = "#8E836C";
-const FAINT2 = "#9A8F76";
-const CLAY   = "#BC5228";
-const FOREST = "#1C4B3A";
+import {
+  serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
+  FOREST_ACTION as FOREST,
+} from "@/components/tokens";
+import { apiFetch } from "@/lib/client";
 
 interface CampaignItem {
   _id: string;
@@ -48,12 +43,10 @@ export default function ComposePage() {
 
   // Load campaigns once
   useEffect(() => {
-    fetch("/api/campaigns")
-      .then((r) => r.json())
-      .then((data: unknown) => {
-        if (Array.isArray(data)) setCampaigns(data as CampaignItem[]);
-      })
-      .catch(() => {});
+    apiFetch<CampaignItem[]>("/api/campaigns").then(({ data, error }) => {
+      if (Array.isArray(data)) setCampaigns(data);
+      else if (error) setApiError(`Couldn't load campaigns — ${error}`);
+    });
   }, []);
 
   function handleCampaignChange(id: string) {
@@ -65,17 +58,18 @@ export default function ComposePage() {
     setApiError(null);
     if (!id) return;
 
-    fetch(`/api/contacts?campaignId=${id}&status=active`)
-      .then((r) => r.json())
-      .then((data: unknown) => {
+    apiFetch<ContactItem[]>(`/api/contacts?campaignId=${id}&status=active`).then(
+      ({ data, error }) => {
         if (Array.isArray(data)) {
-          const sorted = (data as ContactItem[]).sort((a, b) =>
+          const sorted = [...data].sort((a, b) =>
             a.businessName.localeCompare(b.businessName)
           );
           setContacts(sorted);
+        } else if (error) {
+          setApiError(`Couldn't load contacts — ${error}`);
         }
-      })
-      .catch(() => {});
+      }
+    );
   }
 
   function toggleContact(id: string, on: boolean) {

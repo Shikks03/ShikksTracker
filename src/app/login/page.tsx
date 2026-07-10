@@ -2,15 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Panel, Button, inputClass } from "@/components/ui";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-const INK     = "#1A1712";
-const FAINT   = "#8E836C";
-const CLAY    = "#BC5228";
-const PAPER   = "#ECE7D9";
+import { serif, grotesk, mono, INK, FAINT, CLAY, PAPER } from "@/components/tokens";
 
 // ── Login page ────────────────────────────────────────────────────────────────
 

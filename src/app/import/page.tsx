@@ -3,16 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { Panel, Button, inputClass } from "@/components/ui";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-const INK     = "#1A1712";
-const FAINT   = "#8E836C";
-const FAINT2  = "#9A8F76";
-const CLAY    = "#BC5228";
-const FOREST  = "#1C4B3A";
+import {
+  serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
+  FOREST_ACTION as FOREST,
+} from "@/components/tokens";
+import { apiFetch } from "@/lib/client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,17 +67,16 @@ export default function ImportPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load campaigns
+  // Load campaigns (previously swallowed errors with `.catch(() => {})` — GAPS 4.2)
   useEffect(() => {
-    fetch("/api/campaigns")
-      .then((r) => r.json())
-      .then((data: unknown) => {
-        if (!Array.isArray(data)) return;
-        const list = data as Campaign[];
-        setCampaigns(list);
-        if (list.length > 0) setCampaignId(list[0]._id);
-      })
-      .catch(() => {});
+    apiFetch<Campaign[]>("/api/campaigns").then(({ data, error }) => {
+      if (Array.isArray(data)) {
+        setCampaigns(data);
+        if (data.length > 0) setCampaignId(data[0]._id);
+      } else if (error) {
+        setUploadError(`Couldn't load campaigns — ${error}`);
+      }
+    });
   }, []);
 
   // Hydrate lastImport from localStorage

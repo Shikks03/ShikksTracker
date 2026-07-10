@@ -3,15 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Panel, Button, inputClass, monoInputClass } from "@/components/ui";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-const INK     = "#1A1712";
-const FAINT   = "#8E836C";
-const FAINT2  = "#9A8F76";
-const CLAY    = "#BC5228";
+import { serif, grotesk, mono, INK, FAINT, FAINT2, CLAY } from "@/components/tokens";
+import { apiFetch } from "@/lib/client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,27 +23,6 @@ const REASON_META: Record<Reason, { squareColor: string; textColor: string; labe
   bounced:      { squareColor: "#C68A1E", textColor: "#96712A", label: "BOUNCED" },
   manual:       { squareColor: "#5B6472", textColor: "#5B6472", label: "MANUAL" },
 };
-
-// ── API helper ────────────────────────────────────────────────────────────────
-
-async function apiFetch<T>(
-  url: string,
-  options?: RequestInit
-): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return { data: null, error: body.error ?? `HTTP ${res.status}` };
-    }
-    return { data: (await res.json()) as T, error: null };
-  } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : String(err) };
-  }
-}
 
 function fmtDate(d: string): string {
   const dt  = new Date(d);

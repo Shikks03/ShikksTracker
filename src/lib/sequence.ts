@@ -28,17 +28,11 @@ import type { Types } from "mongoose";
 import { checkReplies } from "@/lib/replies";
 import { applyPlaceholders } from "@/lib/compose";
 import { suppressContact } from "@/lib/contacts";
+import { envInt } from "@/lib/env";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
 // ---------------------------------------------------------------------------
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 const DAILY_SEND_CAP = envInt("DAILY_SEND_CAP", 15);
 /**

@@ -16,23 +16,11 @@ import {
   panelShadow,
 } from "@/components/ui";
 import { useNextSendCountdown } from "@/components/useNextSendCountdown";
-
-// ── Design tokens (module-level constants, safe to reference in sub-components)
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-
-const INK        = "#1A1712";
-const FAINT      = "#8E836C";
-const FAINT2     = "#9A8F76";
-const CLAY       = "#BC5228";
-const AMBER      = "#C68A1E";
-const AMBER_TEXT = "#96712A";
-const HOT_TEXT   = "#8A6212";
-const GREEN_SENT = "#5A7D5A";
-const HOT_BG     = "#F6ECCE";
-
-const HOT_THRESHOLD = 5;
+import {
+  serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
+  AMBER, AMBER_TEXT, HOT_TEXT, GREEN_SENT, HOT_BG,
+} from "@/components/tokens";
+import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
 
 // Send window hours (Manila) — must match sequence.ts
 const SEND_WINDOW_START = 8;
@@ -315,6 +303,7 @@ export default function Dashboard() {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [draftCount,    setDraftCount]    = useState(0);
+  const [configError,   setConfigError]   = useState<string | null>(null); // campaigns/draft-count/cron-run load failures (previously swallowed)
   const [lastCronRun,   setLastCronRun]   = useState<CronRunDoc | null | "none">(null); // null=loading, "none"=no runs yet
 
   // Filter state
@@ -325,32 +314,28 @@ export default function Dashboard() {
   const [hotOnly,       setHotOnly]       = useState(false);
   const [sortByScore,   setSortByScore]   = useState(true);
 
-  // One-time: campaigns + draft count + last cron run
+  // One-time: campaigns + draft count + last cron run.
+  // These used to swallow errors with `.catch(() => {})` (GAPS 4.2) — a failed
+  // campaigns load left the filter dropdown mysteriously empty. Now surfaced via
+  // configError (rendered as a slim strip near the contacts error panel).
   useEffect(() => {
-    fetch("/api/campaigns")
-      .then((r) => r.json())
-      .then((d: unknown) => {
-        if (Array.isArray(d)) setCampaigns(d as Campaign[]);
-      })
-      .catch(() => {});
+    apiFetch<Campaign[]>("/api/campaigns").then(({ data, error }) => {
+      if (Array.isArray(data)) setCampaigns(data);
+      else if (error) setConfigError(`Couldn't load campaigns — ${error}`);
+    });
 
-    fetch("/api/email-logs?status=draft")
-      .then((r) => r.json())
-      .then((d: unknown) => {
-        if (Array.isArray(d)) setDraftCount(d.length);
-      })
-      .catch(() => {});
+    apiFetch<{ length: number }[]>("/api/email-logs?status=draft").then(
+      ({ data, error }) => {
+        if (Array.isArray(data)) setDraftCount(data.length);
+        else if (error) setConfigError(`Couldn't load draft count — ${error}`);
+      }
+    );
 
-    fetch("/api/cron-runs?limit=1")
-      .then((r) => r.json())
-      .then((d: unknown) => {
-        if (Array.isArray(d) && d.length > 0) {
-          setLastCronRun(d[0] as CronRunDoc);
-        } else {
-          setLastCronRun("none");
-        }
-      })
-      .catch(() => setLastCronRun("none"));
+    apiFetch<CronRunDoc[]>("/api/cron-runs?limit=1").then(({ data }) => {
+      // A missing/errored cron-run history is a normal "no runs yet" state, not
+      // a user-facing error — keep the existing behaviour.
+      setLastCronRun(Array.isArray(data) && data.length > 0 ? data[0] : "none");
+    });
   }, []);
 
   // Contacts — re-fetched on filter change
@@ -880,6 +865,13 @@ export default function Dashboard() {
         {!loading && error && (
           <Panel style={{ padding: "22px 28px" }}>
             <MonoLabel style={{ color: CLAY }}>{error}</MonoLabel>
+          </Panel>
+        )}
+
+        {/* Config-load error (campaigns / draft count) — previously swallowed */}
+        {configError && (
+          <Panel style={{ padding: "16px 28px" }}>
+            <MonoLabel style={{ color: CLAY }}>{configError}</MonoLabel>
           </Panel>
         )}
 

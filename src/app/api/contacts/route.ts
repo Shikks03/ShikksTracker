@@ -4,15 +4,9 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
 import { createContactChecked, CreateContactInput } from "@/lib/contacts";
+import { envInt } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 const HOT_LEAD_THRESHOLD = envInt("HOT_LEAD_THRESHOLD", 5);
 

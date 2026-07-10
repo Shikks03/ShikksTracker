@@ -10,21 +10,12 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import { useNextSendCountdown } from "@/components/useNextSendCountdown";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-
-const INK         = "#1A1712";
-const FAINT       = "#8E836C";
-const FAINT2      = "#9A8F76";
-const CLAY        = "#BC5228";
-const AMBER_BORDER = "#C68A1E";
-const AMBER_TEXT   = "#96712A";
-const FOREST       = "#1C4B3A";
-
-const HOT_THRESHOLD = 5;
+import {
+  serif, grotesk, mono, INK, FAINT, FAINT2, CLAY, AMBER_TEXT,
+  AMBER as AMBER_BORDER,
+  FOREST_ACTION as FOREST,
+} from "@/components/tokens";
+import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,32 +53,6 @@ function ordinalStage(stage: 1 | 2 | 3): string {
   if (stage === 1) return "1ST";
   if (stage === 2) return "2ND";
   return "3RD";
-}
-
-async function apiFetch<T>(
-  url: string,
-  options?: RequestInit
-): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return {
-        data: null,
-        error: (body as { error?: string }).error ?? `HTTP ${res.status}`,
-      };
-    }
-    const data = (await res.json()) as T;
-    return { data, error: null };
-  } catch (err) {
-    return {
-      data: null,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -280,11 +245,21 @@ export default function ReviewPage() {
     const safe = drafts.filter(
       (d) => (contactMap[d.contactId]?.engagementScore ?? 0) < HOT_THRESHOLD
     );
+    setGlobalError(null);
+    // Collect per-draft results — previously every error was ignored, so a
+    // partial failure looked like full success (GAPS 4.2).
+    let approved = 0;
+    let failed = 0;
     for (const d of safe) {
-      await apiFetch(`/api/email-logs/${d._id}`, {
+      const { error } = await apiFetch(`/api/email-logs/${d._id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "approved" }),
       });
+      if (error) failed++;
+      else approved++;
+    }
+    if (failed > 0) {
+      setGlobalError(`Approved ${approved} of ${safe.length} — ${failed} failed.`);
     }
     setCurrentIdx(0);
     setEditMode(false);

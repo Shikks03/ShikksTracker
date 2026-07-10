@@ -3,15 +3,9 @@ import { connectDB } from "@/lib/db";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
 import { getManilaDayStart, sendOneLog } from "@/lib/sequence";
+import { envInt } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 const DAILY_SEND_CAP  = envInt("DAILY_SEND_CAP",  15);
 const SEND_BATCH_MAX  = envInt("SEND_BATCH_MAX",   5);

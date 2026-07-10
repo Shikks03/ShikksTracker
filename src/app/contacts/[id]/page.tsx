@@ -11,19 +11,11 @@ import {
   PIPELINE_META,
   Button,
 } from "@/components/ui";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const serif   = "var(--font-instrument-serif)";
-const grotesk = "var(--font-familjen)";
-const mono    = "var(--font-jetbrains)";
-
-const INK    = "#1A1712";
-const FAINT  = "#8E836C";
-const FAINT2 = "#9A8F76";
-const CLAY   = "#BC5228";
-const FOREST = "#1C6E3A";
-
-const HOT_THRESHOLD = 5;
+import {
+  serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
+  FOREST_WON as FOREST,
+} from "@/components/tokens";
+import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -129,25 +121,6 @@ interface Campaign {
 }
 
 // ── API helper ────────────────────────────────────────────────────────────────
-
-async function apiFetch<T>(
-  url: string,
-  options?: RequestInit
-): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return { data: null, error: body.error ?? `HTTP ${res.status}` };
-    }
-    return { data: (await res.json()) as T, error: null };
-  } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : String(err) };
-  }
-}
 
 // ── Thread builder ────────────────────────────────────────────────────────────
 
