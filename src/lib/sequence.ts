@@ -285,6 +285,11 @@ export interface SendOneLogResult {
  *   - Contact inactive or missing  → revert to "draft" (won't re-appear in send queue)
  *   - Campaign missing             → revert to "draft"
  *   - Gmail send failure           → revert to "approved" + record error fields
+ *                                    (email never left; safe to auto-retry)
+ *   - Post-send failure (rfcMessageId fetch, DB updates after Gmail succeeded)
+ *                                  → revert to "draft" + record error fields
+ *                                    (email WAS sent; do NOT auto-retry — human must verify
+ *                                     in Gmail Sent folder before re-approving)
  *   - Gmail success                → update to "sent" with all tracking fields
  *
  * No code path may leave the log stuck in "sending" — every branch resolves the state.
@@ -309,6 +314,11 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
   }
 
   // From here on the log is "sending" in the DB. Every exit path MUST resolve the state.
+
+  // Tracks whether Gmail accepted the message. Declared outside the try so the outer
+  // catch can distinguish pre-send failures (safe to auto-retry) from post-send failures
+  // (email already delivered — human must verify before re-approving).
+  let gmailSendSucceeded = false;
 
   try {
     // Load contact
@@ -404,6 +414,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       });
       messageId = sendResult.messageId;
       returnedThreadId = sendResult.threadId;
+      gmailSendSucceeded = true;
     } catch (gmailErr) {
       // Gmail failed — revert to "approved" so the user can retry after investigation
       const errMsg = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
@@ -426,6 +437,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
 
     // Update EmailLog — persist the substituted subject/body so the sent
     // record is an accurate audit trail of what actually went out.
+    // lastSendError: null clears any stale error from a prior failed attempt.
     await EmailLog.findByIdAndUpdate(log._id, {
       status: "sent",
       sentAt,
@@ -436,6 +448,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       rfcMessageId,
       trackingPixelId,
       links,
+      lastSendError: null,
     });
 
     // Update Contact
@@ -474,17 +487,35 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
 
     return { status: "sent", contactName: contact.businessName, subject: subjectToSend };
   } catch (err) {
-    // Unexpected error after claim — revert to "approved" so the log isn't stuck in "sending"
+    // Unexpected error after claim. Branch on whether Gmail already accepted the message:
+    //   - Pre-send failure  (gmailSendSucceeded === false): email never left; revert to
+    //     "approved" so the next cron run retries automatically.
+    //   - Post-send failure (gmailSendSucceeded === true):  email was delivered but state
+    //     recording failed. Revert to "draft" — NOT "approved" — so it does NOT auto-retry.
+    //     A human must verify in the Gmail Sent folder before re-approving.
     const msg = err instanceof Error ? err.message : String(err);
-    await EmailLog.findByIdAndUpdate(log._id, {
-      status: "approved",
-      sendAttemptedAt: null,
-      $inc: { sendErrorCount: 1 },
-      lastSendError: `unexpected error: ${msg}`,
-    }).catch(() => {
-      // Best-effort revert — if this also fails, the stale-send sweep will catch it
-      console.error(`[sequence] CRITICAL: failed to revert log ${String(log._id)} from "sending" to "approved":`, msg);
-    });
+    if (gmailSendSucceeded) {
+      // Email went out but post-send DB/fetch work failed. Human review required.
+      await EmailLog.findByIdAndUpdate(log._id, {
+        status: "draft",
+        sendAttemptedAt: null,
+        $inc: { sendErrorCount: 1 },
+        lastSendError: `interrupted after Gmail send — email was sent but state update failed; verify in Gmail Sent folder before re-approving`,
+      }).catch(() => {
+        console.error(`[sequence] CRITICAL: failed to revert log ${String(log._id)} from "sending" to "draft" after post-send failure:`, msg);
+      });
+    } else {
+      // Pre-send failure — email never left; safe to auto-retry.
+      await EmailLog.findByIdAndUpdate(log._id, {
+        status: "approved",
+        sendAttemptedAt: null,
+        $inc: { sendErrorCount: 1 },
+        lastSendError: `unexpected error: ${msg}`,
+      }).catch(() => {
+        // Best-effort revert — if this also fails, the stale-send sweep will catch it
+        console.error(`[sequence] CRITICAL: failed to revert log ${String(log._id)} from "sending" to "approved":`, msg);
+      });
+    }
     return { status: "failed", contactName: "unknown", subject: log.subject, error: msg };
   }
 }
