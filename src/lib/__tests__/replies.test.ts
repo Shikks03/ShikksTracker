@@ -108,51 +108,145 @@ describe("makeSnippet", () => {
 // ---------------------------------------------------------------------------
 
 describe("isOptOut", () => {
-  // --- True positives ---
+  // ---------------------------------------------------------------------------
+  // Whole-message equality matches (single-word / short opt-out commands)
+  // ---------------------------------------------------------------------------
 
-  it("detects 'STOP' keyword (case-insensitive)", () => {
+  it("whole-message 'STOP' (uppercase) → true", () => {
     expect(isOptOut("STOP")).toBe(true);
   });
 
-  it("detects 'stop' keyword", () => {
-    expect(isOptOut("Please stop emailing me.")).toBe(true);
+  it("whole-message 'Stop.' (capitalised, trailing period) → true", () => {
+    expect(isOptOut("Stop.")).toBe(true);
   });
 
-  it("detects 'unsubscribe' keyword", () => {
-    expect(isOptOut("I want to unsubscribe from your list.")).toBe(true);
+  it("whole-message 'stop!' (trailing exclamation) → true", () => {
+    expect(isOptOut("stop!")).toBe(true);
   });
 
-  it("detects 'UNSUBSCRIBE' (case-insensitive)", () => {
+  it("whole-message 'unsubscribe' → true", () => {
+    expect(isOptOut("unsubscribe")).toBe(true);
+  });
+
+  it("whole-message 'UNSUBSCRIBE' (case-insensitive) → true", () => {
     expect(isOptOut("UNSUBSCRIBE")).toBe(true);
   });
 
-  it("detects 'opt out' with space", () => {
-    expect(isOptOut("Please opt out of further emails.")).toBe(true);
+  it("whole-message 'opt out' → true", () => {
+    expect(isOptOut("opt out")).toBe(true);
   });
 
-  it("detects 'opt-out' with hyphen", () => {
-    expect(isOptOut("I want to opt-out.")).toBe(true);
+  it("whole-message 'opt-out' → true", () => {
+    expect(isOptOut("opt-out")).toBe(true);
   });
 
-  it("detects 'optout' without separator", () => {
+  it("whole-message with surrounding whitespace → true", () => {
+    expect(isOptOut("  stop  ")).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Other explicit opt-out forms (intent patterns catch these mid-sentence too)
+  // ---------------------------------------------------------------------------
+
+  it("'optout please' → true (opt[ -]?out pattern matches no-separator form)", () => {
     expect(isOptOut("optout please")).toBe(true);
   });
 
-  // --- False positives (KNOWN BUGS — Task 3.2 will fix) ---
+  // ---------------------------------------------------------------------------
+  // Intent-phrase matches (explicit opt-out intent anywhere in the text)
+  // ---------------------------------------------------------------------------
 
-  it("CURRENT BEHAVIOR: falsely flags 'stop by our office' as opt-out (Task 3.2 fixes \\bstop\\b false positives)", () => {
-    // BUG: \bstop\b matches 'stop' in 'stop by our office next week'
-    // Task 3.2 will replace \bstop\b with a more specific pattern
-    // This test asserts CURRENT behavior so the suite stays green.
-    expect(isOptOut("stop by our office next week")).toBe(true);
+  it("'please remove me from your list' → true", () => {
+    expect(isOptOut("please remove me from your list")).toBe(true);
   });
 
-  it("CURRENT BEHAVIOR: falsely flags 'please stop by' as opt-out (Task 3.2 fixes)", () => {
-    // Another \bstop\b false positive — 'stop by' is directional, not opt-out
-    expect(isOptOut("please stop by when you get a chance")).toBe(true);
+  it("'not interested, please unsubscribe me' → true", () => {
+    expect(isOptOut("not interested, please unsubscribe me")).toBe(true);
   });
 
-  // --- True negatives ---
+  it("'do not email me again' → true", () => {
+    expect(isOptOut("do not email me again")).toBe(true);
+  });
+
+  it("'do not contact me' → true", () => {
+    expect(isOptOut("do not contact me")).toBe(true);
+  });
+
+  it("'stop emailing me' → true", () => {
+    expect(isOptOut("stop emailing me")).toBe(true);
+  });
+
+  it("'stop contacting me' → true", () => {
+    expect(isOptOut("stop contacting me")).toBe(true);
+  });
+
+  it("'Please stop emailing me.' → true (intent phrase with punctuation)", () => {
+    expect(isOptOut("Please stop emailing me.")).toBe(true);
+  });
+
+  it("'I want to unsubscribe from your list.' → true", () => {
+    expect(isOptOut("I want to unsubscribe from your list.")).toBe(true);
+  });
+
+  it("'Please opt out of further emails.' → true", () => {
+    expect(isOptOut("Please opt out of further emails.")).toBe(true);
+  });
+
+  it("'I want to opt-out.' → true", () => {
+    expect(isOptOut("I want to opt-out.")).toBe(true);
+  });
+
+  it("'remove me from your list' → true", () => {
+    expect(isOptOut("remove me from your list")).toBe(true);
+  });
+
+  it("'opt me out please' → true", () => {
+    expect(isOptOut("opt me out please")).toBe(true);
+  });
+
+  it("'take me off your mailing list' → true", () => {
+    expect(isOptOut("take me off your mailing list")).toBe(true);
+  });
+
+  it("'take me off this list' → true", () => {
+    expect(isOptOut("take me off this list")).toBe(true);
+  });
+
+  it("'please take me off your list' → true", () => {
+    expect(isOptOut("please take me off your list")).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // False positives fixed — these were incorrectly flagged by the old \bstop\b pattern
+  // ---------------------------------------------------------------------------
+
+  it("'stop by our office next week' → false (directional 'stop by', not opt-out)", () => {
+    expect(isOptOut("stop by our office next week")).toBe(false);
+  });
+
+  it("'please stop by when you get a chance' → false (directional 'stop by', not opt-out)", () => {
+    expect(isOptOut("please stop by when you get a chance")).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // True negatives — normal business replies that must NOT trigger opt-out
+  // ---------------------------------------------------------------------------
+
+  it("'we should stop by sometime' → false", () => {
+    expect(isOptOut("we should stop by sometime")).toBe(false);
+  });
+
+  it("'one-stop shop' → false", () => {
+    expect(isOptOut("we're a one-stop shop for all your needs")).toBe(false);
+  });
+
+  it("\"I can't stop thinking about this offer\" → false", () => {
+    expect(isOptOut("I can't stop thinking about this offer")).toBe(false);
+  });
+
+  it("\"don't stop the campaign\" → false", () => {
+    expect(isOptOut("don't stop the campaign")).toBe(false);
+  });
 
   it("does not flag a normal positive reply", () => {
     expect(isOptOut("Hi, I'd love to learn more about your offer!")).toBe(false);
@@ -161,6 +255,10 @@ describe("isOptOut", () => {
   it("does not flag an empty string", () => {
     expect(isOptOut("")).toBe(false);
   });
+
+  // ---------------------------------------------------------------------------
+  // Quoted-text stripping ensures our own email footer doesn't self-trigger
+  // ---------------------------------------------------------------------------
 
   it("strips quoted text before checking — STOP in quoted block does not trigger", () => {
     // The quoted footer line "just reply STOP" should be stripped before matching

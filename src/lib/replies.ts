@@ -6,12 +6,14 @@
  *   1. Polls Gmail threads for replies from active contacts.
  *   2. Detects opt-out keywords in the reply body (stripping quoted text first).
  *   3. Applies state transitions (contact status, EmailLog updates, Suppression upsert).
+ *   4. Queues takeover alerts (for BOTH opt-outs and normal replies) and sends them last.
  */
 
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
-import { getGmailClient } from "@/lib/gmail";
+import { getGmailClient, sendGmailMessage, getSenderAddress } from "@/lib/gmail";
+import { htmlEscape } from "@/lib/tracking";
 import { bumpEngagement, SCORE_REPLY } from "@/lib/scoring";
 import type { Types } from "mongoose";
 
@@ -69,16 +71,74 @@ export function makeSnippet(text: string): string | null {
   return collapsed.length > 80 ? collapsed.slice(0, 80) + "…" : collapsed;
 }
 
-const OPT_OUT_PATTERNS = [
-  /\bstop\b/i,
+/**
+ * Opt-out matching design rationale (asymmetry principle):
+ *
+ * A false-positive opt-out is SILENT AND PERMANENT — the contact is unsubscribed,
+ * a Suppression entry is created, pending drafts are deleted, and NO alert fires.
+ * There is no undo for the user.
+ *
+ * A false-negative opt-out surfaces as a normal reply with a takeover alert — a
+ * human reads it and can manually unsubscribe. The cost is one accidental follow-up
+ * at most; recoverable.
+ *
+ * Therefore, the matcher must be STRICT. Ambiguous signals (bare "stop" mid-sentence)
+ * are treated as NORMAL replies so the human takeover alert fires and a human decides.
+ *
+ * Tagalog opt-outs (e.g. "huwag na") are deliberately NOT matched here — a Tagalog
+ * opt-out will arrive as a normal reply with a takeover alert and the human handles it.
+ * TODO: evaluate adding Tagalog patterns after collecting real data in production.
+ */
+
+/**
+ * Whole-message equality patterns (quote-stripped, trimmed, trailing punctuation stripped).
+ * These are common single-word / short commands used as opt-out signals.
+ */
+const WHOLE_MESSAGE_OPT_OUTS = [
+  "stop",
+  "unsubscribe",
+  "opt out",
+  "opt-out",
+];
+
+/**
+ * Intent-phrase patterns: explicit opt-out intent anywhere in the cleaned text.
+ * Kept intentionally strict — no bare \bstop\b (see rationale above).
+ *
+ * \bunsubscribe\b and \bopt[ -]?out\b are kept because they are unambiguous in isolation
+ * and are rarely used innocently in business replies.
+ */
+const OPT_OUT_INTENT_PATTERNS: RegExp[] = [
+  // "please stop emailing/contacting/messaging me"
+  /\bstop\s+(emailing|contacting|messaging)\s+me\b/i,
+  // "reply stop" — opt-out instruction carried in the reply itself
+  /\breply\s+stop\b/i,
+  // "please remove me", "remove me from your list"
+  /\bremove\s+me\b/i,
+  // "please unsubscribe me", "please take me off your list"
+  /\bplease\s+(remove|unsubscribe|take\s+me\s+off)\b/i,
+  // "take me off your/the/this list" (optional modifier word: "mailing list", "email list", etc.)
+  /\btake\s+me\s+off\s+(your|the|this)(\s+\w+)?\s+list\b/i,
+  // "opt me out"
+  /\bopt\s+me\s+out\b/i,
+  // "do not contact me", "do not email me", "do not email me again"
+  /\bdo\s+not\s+(contact|email)\s+me(\s+again)?\b/i,
+  // standalone \bunsubscribe\b (unambiguous)
   /\bunsubscribe\b/i,
+  // standalone \bopt[ -]?out\b (unambiguous)
   /\bopt[ -]?out\b/i,
 ];
 
 /** Exported for unit tests only — treat as internal. */
 export function isOptOut(text: string): boolean {
-  const clean = stripQuotedText(text);
-  return OPT_OUT_PATTERNS.some((re) => re.test(clean));
+  const clean = stripQuotedText(text).trim();
+
+  // Whole-message equality check: strip trailing punctuation (., !, ?) before comparing
+  const stripped = clean.replace(/[.!?]+$/, "").trim().toLowerCase();
+  if (WHOLE_MESSAGE_OPT_OUTS.includes(stripped)) return true;
+
+  // Intent-phrase check anywhere in the cleaned text
+  return OPT_OUT_INTENT_PATTERNS.some((re) => re.test(clean));
 }
 
 /**
@@ -128,6 +188,16 @@ function extractPlainText(part: GmailMessagePart): string | null {
 // Main export
 // ---------------------------------------------------------------------------
 
+/**
+ * Queued takeover alert (sent after all state transitions complete).
+ * Alerts queue so that a failure in alert delivery can never corrupt contact state,
+ * and conversely so that contact state errors can never prevent alert delivery.
+ */
+interface QueuedAlert {
+  subject: string;
+  htmlBody: string;
+}
+
 export async function checkReplies(): Promise<RepliesResult> {
   const result: RepliesResult = {
     checked: 0,
@@ -135,6 +205,11 @@ export async function checkReplies(): Promise<RepliesResult> {
     unsubscribed: 0,
     errors: [],
   };
+
+  // Collect alerts to send after ALL state transitions complete.
+  // This ensures: (a) alert failures cannot corrupt contact state, and
+  // (b) a state-transition failure on one contact cannot skip the alert for another.
+  const alertQueue: QueuedAlert[] = [];
 
   const gmail = getGmailClient();
 
@@ -269,6 +344,25 @@ export async function checkReplies(): Promise<RepliesResult> {
         });
 
         result.unsubscribed++;
+
+        // 5. Queue takeover alert for opt-out — sent last so alert failure cannot
+        //    corrupt state above, and so the user can audit for matcher misfires.
+        //    Subject uses "Opt-out from" to distinguish from normal-reply alerts.
+        const escapedName = htmlEscape(contact.businessName);
+        const escapedEmail = htmlEscape(contact.contactEmail);
+        const escapedSnippet = optOutClean ? htmlEscape(makeSnippet(optOutClean) ?? "") : "";
+        alertQueue.push({
+          subject: `Opt-out from ${contact.businessName}`,
+          htmlBody: `
+            <h2>Opt-out detected — ${escapedName}</h2>
+            <p><strong>Email:</strong> ${escapedEmail}</p>
+            <p><strong>Message snippet:</strong> ${escapedSnippet || "(empty)"}</p>
+            <p>The contact has been unsubscribed and added to the suppression list.
+               If this looks like a false positive (e.g. the phrase was not a real opt-out),
+               you can manually re-activate the contact and remove the suppression entry
+               from the dashboard.</p>
+          `.trim(),
+        });
       } else {
         // --- Normal reply ---
 
@@ -298,10 +392,55 @@ export async function checkReplies(): Promise<RepliesResult> {
         });
 
         result.replied++;
+
+        // 5. Queue takeover alert for normal reply — sent last so alert failure
+        //    cannot corrupt state above.
+        const escapedName = htmlEscape(contact.businessName);
+        const escapedEmail = htmlEscape(contact.contactEmail);
+        const escapedSnippet = replyClean ? htmlEscape(makeSnippet(replyClean) ?? "") : "";
+        alertQueue.push({
+          subject: `Reply from ${contact.businessName}`,
+          htmlBody: `
+            <h2>New reply — ${escapedName}</h2>
+            <p><strong>Email:</strong> ${escapedEmail}</p>
+            <p><strong>Message snippet:</strong> ${escapedSnippet || "(no preview available)"}</p>
+            <p>Log in to the dashboard to view the full thread and move this lead forward.</p>
+          `.trim(),
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Contact ${String(contact._id)}: ${msg}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Send all queued alerts — AFTER all state transitions complete.
+  // Each alert is sent in its own try/catch so one failure cannot suppress others.
+  // ---------------------------------------------------------------------------
+
+  if (alertQueue.length > 0) {
+    let selfAddress: string | null = null;
+    try {
+      selfAddress = await getSenderAddress(gmail);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Alert: could not resolve sender address — ${msg}`);
+    }
+
+    if (selfAddress) {
+      for (const alert of alertQueue) {
+        try {
+          await sendGmailMessage({
+            to: selfAddress,
+            subject: alert.subject,
+            htmlBody: alert.htmlBody,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push(`Alert "${alert.subject}": ${msg}`);
+        }
+      }
     }
   }
 
