@@ -89,11 +89,11 @@ describe("isWithinSendWindow", () => {
     expect(isWithinSendWindow(date)).toBe(true);
   });
 
-  it("returns false for Manila hour 18 (window closed boundary — CURRENT behavior; Task 3.7 aligns UI to this)", () => {
+  it("returns false for Manila hour 18 (window closed boundary — exclusive upper bound)", () => {
     // Manila 18:00 = UTC 2026-07-04T10:00:00Z
-    // The engine correctly excludes hour 18 (exclusive upper bound).
-    // The UI showed "8am-6pm" which implies inclusivity — Task 3.7 reconciles
-    // that discrepancy. This test pins the current code behavior.
+    // The engine excludes hour 18 (exclusive upper bound: hour < 18).
+    // Task 3.7 aligned the UI hook (useNextSendCountdown) to the same boundary
+    // so the dashboard countdown no longer promises an 18:00 send slot that never fires.
     const date = new Date("2026-07-04T10:00:00Z");
     expect(isWithinSendWindow(date)).toBe(false);
   });

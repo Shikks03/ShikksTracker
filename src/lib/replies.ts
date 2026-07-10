@@ -202,6 +202,33 @@ export function isGmailReaction(body: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// From-header address extractor
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts the bare email address from a From header value.
+ *
+ * RFC 5322 From headers may be in any of these forms:
+ *   - "ana@x.com"                    → "ana@x.com"
+ *   - "Ana Reyes <ana@x.com>"        → "ana@x.com"
+ *   - '"Quoted Name" <ana@x.com>'    → "ana@x.com"
+ *   - "  ANA@X.COM  "                → "ana@x.com"  (whitespace + case normalised)
+ *
+ * If the header contains angle brackets, the content inside them is taken.
+ * Otherwise the entire header value is used (trimmed). The result is always
+ * lowercased so callers can compare with === against lowercase-stored emails.
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function extractFromAddress(fromHeader: string): string {
+  const angleMatch = fromHeader.match(/<([^>]+)>/);
+  if (angleMatch) {
+    return angleMatch[1].trim().toLowerCase();
+  }
+  return fromHeader.trim().toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
 // Gmail payload helpers
 // ---------------------------------------------------------------------------
 
@@ -399,12 +426,15 @@ export async function checkReplies(): Promise<RepliesResult> {
         const internalDateMs = parseInt(msg.internalDate, 10);
         if (internalDateMs <= sentAtMs) continue; // not newer than our send
 
-        // Check if From header contains the contact's email
+        // Check if From header is exactly the contact's email.
+        // Use extractFromAddress to strip the display-name portion (e.g.
+        // "Ana Reyes <ana@x.com>") before comparing, so "lana@x.com" cannot
+        // substring-match against "ana@x.com".
         const fromHeader =
           msg.payload?.headers
             ?.find((h) => h.name?.toLowerCase() === "from")
-            ?.value?.toLowerCase() ?? "";
-        if (!fromHeader.includes(contactEmailLower)) continue;
+            ?.value ?? "";
+        if (extractFromAddress(fromHeader) !== contactEmailLower) continue;
 
         // Fetch the full message so we can (a) skip Gmail reactions and
         // (b) reuse the body for opt-out detection below.

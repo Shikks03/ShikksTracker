@@ -3,7 +3,6 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
-import { applyPlaceholders } from "@/lib/compose";
 
 export const dynamic = "force-dynamic";
 
@@ -77,17 +76,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           continue;
         }
 
-        const placeholderContact = {
-          businessName: contact.businessName,
-          contactName: contact.contactName,
-        };
-
+        // Store the template text verbatim — placeholder substitution
+        // ({{businessName}}, {{contactName}}) happens at send time inside
+        // sendOneLog, which is the single documented substitution path.
+        // Substituting here and again at send time would double-substitute
+        // and would also substitute before threading logic can update the subject.
         await EmailLog.create({
           contactId: contact._id,
           campaignId: contact.campaignId,
           stage,
-          subject: applyPlaceholders(subjectTemplate, placeholderContact),
-          body: applyPlaceholders(bodyTemplate, placeholderContact),
+          subject: subjectTemplate,
+          body: bodyTemplate,
           status: "approved",
         });
 

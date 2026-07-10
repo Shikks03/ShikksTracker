@@ -14,7 +14,50 @@ import {
   makeSnippet,
   isOptOut,
   isGmailReaction,
+  extractFromAddress,
 } from "@/lib/replies";
+
+// ---------------------------------------------------------------------------
+// extractFromAddress
+// ---------------------------------------------------------------------------
+
+describe("extractFromAddress", () => {
+  it("returns a bare address unchanged (lowercased)", () => {
+    expect(extractFromAddress("ana@x.com")).toBe("ana@x.com");
+  });
+
+  it("extracts address from 'Name <addr>' form", () => {
+    expect(extractFromAddress("Ana Reyes <ana@x.com>")).toBe("ana@x.com");
+  });
+
+  it("extracts address from '\"Quoted Name\" <addr>' form", () => {
+    expect(extractFromAddress('"Quoted Name" <ana@x.com>')).toBe("ana@x.com");
+  });
+
+  it("handles extra whitespace inside angle brackets", () => {
+    expect(extractFromAddress("Ana <  ana@x.com  >")).toBe("ana@x.com");
+  });
+
+  it("lowercases the result for bare addresses", () => {
+    expect(extractFromAddress("ANA@X.COM")).toBe("ana@x.com");
+  });
+
+  it("lowercases the result for angle-bracket addresses", () => {
+    expect(extractFromAddress("Ana Reyes <ANA@X.COM>")).toBe("ana@x.com");
+  });
+
+  it("trims surrounding whitespace on bare addresses", () => {
+    expect(extractFromAddress("  ana@x.com  ")).toBe("ana@x.com");
+  });
+
+  it("does NOT match lana@x.com against contact ana@x.com (the bug fix)", () => {
+    // This tests the exact false-positive the fix eliminates:
+    // includes("ana@x.com") would have returned true for "lana@x.com"
+    const extracted = extractFromAddress("lana@x.com");
+    expect(extracted === "ana@x.com").toBe(false);
+    expect(extracted).toBe("lana@x.com");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // stripQuotedText

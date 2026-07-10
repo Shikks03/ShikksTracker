@@ -18,7 +18,7 @@ function getNextSendTarget(): number {
     const candidateMs = nextHourMs + i * 3_600_000;
     const utcHour = Math.floor(candidateMs / 3_600_000) % 24;
     const manilaHour = (utcHour + 8) % 24;
-    if (manilaHour >= 8 && manilaHour <= 18) {
+    if (manilaHour >= 8 && manilaHour < 18) {
       return candidateMs;
     }
   }
