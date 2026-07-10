@@ -314,6 +314,12 @@ export async function checkReplies(): Promise<RepliesResult> {
 
       if (optOut) {
         // --- Opt-out reply ---
+        //
+        // NOTE: This path intentionally does NOT call suppressContact() from
+        // src/lib/contacts.ts because this flow interleaves Suppression upsert,
+        // EmailLog marking, and alert queueing in a way that makes refactoring
+        // to a shared helper more risky than helpful. The shared helper handles
+        // the manual-PATCH path (Task 3.4). Structural equivalent is preserved.
 
         // 1. Update contact
         await Contact.findByIdAndUpdate(contact._id, {

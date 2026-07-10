@@ -27,6 +27,7 @@ import { randomUUID } from "crypto";
 import type { Types } from "mongoose";
 import { checkReplies } from "@/lib/replies";
 import { applyPlaceholders } from "@/lib/compose";
+import { suppressContact } from "@/lib/contacts";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -172,7 +173,7 @@ async function fetchRfcMessageId(gmailMessageId: string): Promise<string | null>
 }
 
 // ---------------------------------------------------------------------------
-// Suppression check helper (local — Task 3.4 will consolidate into contacts.ts)
+// Suppression check helper (delegates to suppressContact in contacts.ts)
 // ---------------------------------------------------------------------------
 
 /**
@@ -185,26 +186,16 @@ async function fetchRfcMessageId(gmailMessageId: string): Promise<string | null>
  * The caller (sendOneLog) is responsible for resolving that log separately
  * before returning, since it was already claimed with status "sending".
  *
- * This helper intentionally mirrors the reply-path's opt-out transition in
- * replies.ts (Contact update + EmailLog.deleteMany on draft/approved), but
- * does NOT add a Suppression entry (the entry already exists, that's why we
- * are here) and does NOT fire a takeover alert (a suppression check is not a
- * reply; the entry was created by a human or the opt-out path).
+ * Delegates to suppressContact() in src/lib/contacts.ts with
+ * upsertSuppression: false — the Suppression entry already exists (that's how
+ * we discovered the contact needed suppressing), so we do not re-upsert it.
+ * This is semantically identical to the previous inline implementation.
  *
- * Task 3.4 may extract this into src/lib/contacts.ts as suppressContact().
- * Keep the seam clean: both call sites in this file call this helper; no
- * logic is inlined at the call sites beyond the log-specific cleanup needed
- * by sendOneLog.
+ * Does NOT fire a takeover alert (a suppression check is not a reply; the
+ * entry was created by a human or the opt-out path).
  */
 async function applySuppressionTransition(contactId: Types.ObjectId): Promise<void> {
-  await Contact.findByIdAndUpdate(contactId, {
-    status: "unsubscribed",
-    nextSendAt: null,
-  });
-  await EmailLog.deleteMany({
-    contactId,
-    status: { $in: ["draft", "approved"] },
-  });
+  await suppressContact(contactId, "unsubscribed", { upsertSuppression: false });
 }
 
 // ---------------------------------------------------------------------------

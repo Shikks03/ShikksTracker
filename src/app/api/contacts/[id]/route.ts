@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import { handleError, notFound } from "@/lib/api";
+import { suppressContact } from "@/lib/contacts";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,38 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json() as Record<string, unknown>;
 
+    const incomingStatus = body.status as string | undefined;
+    const isSuppressStatus =
+      incomingStatus === "unsubscribed" || incomingStatus === "bounced";
+
+    if (isSuppressStatus) {
+      // For suppression-triggering status changes, run the shared helper first.
+      // This upserts the Suppression entry, sets status + nextSendAt: null, and
+      // deletes pending draft/approved logs. We pass reason = incomingStatus
+      // which is narrowed to "unsubscribed" | "bounced" here.
+      const reason = incomingStatus as "unsubscribed" | "bounced";
+      await suppressContact(id, reason);
+
+      // Apply any OTHER updatable fields from the same PATCH (e.g. keyPoints,
+      // businessName). Exclude "status" — suppressContact already wrote it —
+      // and "nextSendAt" — suppressContact always nulls it, so we never let a
+      // caller override that from a suppression PATCH.
+      const otherUpdate: Record<string, unknown> = {};
+      for (const field of UPDATABLE_FIELDS) {
+        if (field === "status" || field === "nextSendAt") continue;
+        if (field in body) otherUpdate[field] = body[field];
+      }
+      if (Object.keys(otherUpdate).length > 0) {
+        await Contact.findByIdAndUpdate(id, otherUpdate, { runValidators: true });
+      }
+
+      // Return the final contact state (fresh read so all fields are current)
+      const updated = await Contact.findById(id).lean();
+      if (!updated) return notFound(id);
+      return NextResponse.json(updated);
+    }
+
+    // Non-suppression status changes (and all other field updates) — original path
     const update: Record<string, unknown> = {};
     for (const field of UPDATABLE_FIELDS) {
       if (field in body) update[field] = body[field];

@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
 import Contact, { IContact } from "@/models/Contact";
+import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
 import { Types } from "mongoose";
 
@@ -86,4 +87,79 @@ export async function createContactChecked(
   });
 
   return { outcome: "inserted", contact };
+}
+
+// ---------------------------------------------------------------------------
+// Suppression transition helper
+// ---------------------------------------------------------------------------
+
+export interface SuppressContactOptions {
+  /**
+   * When true (default), upsert a Suppression entry for the contact's email.
+   * Set to false when the Suppression entry already exists (e.g. in the
+   * sequence-engine path where we discovered the contact via a Suppression
+   * lookup — the entry is already there, no need to re-upsert).
+   */
+  upsertSuppression?: boolean;
+}
+
+/**
+ * Shared helper: applies the full "suppress this contact" transition.
+ *
+ * Steps:
+ *  1. Load the contact to get its email (needed for Suppression).
+ *     Returns silently if the contact is not found.
+ *  2. Optionally upsert a Suppression entry (idempotent — safe to call when
+ *     an entry already exists; uses $setOnInsert + $set pattern from replies.ts).
+ *  3. Update the contact:
+ *       status  → "bounced" when reason === "bounced", otherwise "unsubscribed"
+ *       nextSendAt → null
+ *  4. Delete all pending draft/approved logs for the contact.
+ *
+ * Called by:
+ *  - PATCH /api/contacts/[id] (manual status change to unsubscribed/bounced)
+ *  - sequence.ts applySuppressionTransition (existing-suppression path, upsertSuppression: false)
+ *
+ * NOT used by replies.ts opt-out path — that flow interleaves Suppression
+ * upsert with EmailLog replied-marking and alert queueing; leave it as-is.
+ * See replies.ts for the structurally equivalent inline version.
+ *
+ * Caller must ensure connectDB() has been called.
+ */
+export async function suppressContact(
+  contactId: Types.ObjectId | string,
+  reason: "unsubscribed" | "bounced" | "manual",
+  options: SuppressContactOptions = {}
+): Promise<void> {
+  const { upsertSuppression = true } = options;
+
+  const contact = await Contact.findById(contactId).lean();
+  if (!contact) {
+    // Contact not found — nothing to do (may have been deleted concurrently)
+    return;
+  }
+
+  if (upsertSuppression) {
+    // Idempotent upsert: $setOnInsert sets email/addedAt on first insert,
+    // $set updates reason on every call (same pattern as replies.ts opt-out path).
+    await Suppression.updateOne(
+      { email: contact.contactEmail },
+      {
+        $setOnInsert: { email: contact.contactEmail, addedAt: new Date() },
+        $set: { reason },
+      },
+      { upsert: true }
+    );
+  }
+
+  const newStatus = reason === "bounced" ? "bounced" : "unsubscribed";
+  await Contact.findByIdAndUpdate(contactId, {
+    status: newStatus,
+    nextSendAt: null,
+  });
+
+  await EmailLog.deleteMany({
+    contactId,
+    status: { $in: ["draft", "approved"] },
+  });
 }
