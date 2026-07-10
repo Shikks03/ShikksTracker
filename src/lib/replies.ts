@@ -15,6 +15,7 @@ import Suppression from "@/models/Suppression";
 import { getGmailClient, sendGmailMessage, getSenderAddress } from "@/lib/gmail";
 import { htmlEscape } from "@/lib/tracking";
 import { bumpEngagement, SCORE_REPLY } from "@/lib/scoring";
+import { suppressContact } from "@/lib/contacts";
 import type { Types } from "mongoose";
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,50 @@ export interface RepliesResult {
   checked: number;
   replied: number;
   unsubscribed: number;
+  bounced: number;
   errors: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Poll-time bounce detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a Gmail thread message looks like a bounce DSN (Delivery
+ * Status Notification). Checks two signals:
+ *   1. The From header is mailer-daemon or postmaster at any domain.
+ *   2. The message body/snippet contains the contact's email address
+ *      (case-insensitive) — confirming the NDR is about our send to them,
+ *      not some unrelated bounce in the thread.
+ *
+ * Both signals must be present. Relying on just the From header would
+ * wrongly flag legitimate mailer-daemon messages in threads unrelated to
+ * the contact. Relying on just the body text would be too permissive.
+ *
+ * Conservative: if either signal is absent, returns false.
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function isBounceMessage(
+  fromHeader: string,
+  bodyText: string,
+  contactEmail: string
+): boolean {
+  const fromLower = fromHeader.toLowerCase();
+  const isBounceFrom =
+    /\bmailer-daemon\b/.test(fromLower) ||
+    /\bpostmaster\b/.test(fromLower);
+  if (!isBounceFrom) return false;
+
+  return bodyText.toLowerCase().includes(contactEmail.toLowerCase());
+}
+
+/**
+ * Returns true when poll-time bounce detection is enabled.
+ * Enabled by default; set BOUNCE_POLL_DETECTION=false to disable.
+ */
+function isBouncePollingEnabled(): boolean {
+  return process.env.BOUNCE_POLL_DETECTION !== "false";
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +247,7 @@ export async function checkReplies(): Promise<RepliesResult> {
     checked: 0,
     replied: 0,
     unsubscribed: 0,
+    bounced: 0,
     errors: [],
   };
 
@@ -256,6 +301,89 @@ export async function checkReplies(): Promise<RepliesResult> {
       const messages = threadData.messages ?? [];
       const sentAtMs = lastSentLog.sentAt ? lastSentLog.sentAt.getTime() : 0;
       const contactEmailLower = contact.contactEmail.toLowerCase();
+
+      // -----------------------------------------------------------------------
+      // Bounce pre-pass (poll-time bounce detection)
+      //
+      // Runs BEFORE the genuine-reply loop so that a mailer-daemon NDR in the
+      // thread is never mis-classified as an opt-out or reply.
+      //
+      // The genuine-reply loop only looks at messages whose From contains the
+      // contact's email, so it would naturally skip mailer-daemon messages anyway.
+      // We add this explicit pre-pass to actively detect and process bounces rather
+      // than silently ignoring them.
+      //
+      // Gated on BOUNCE_POLL_DETECTION env var (default: enabled). Disable with
+      // BOUNCE_POLL_DETECTION=false if NDR scanning proves noisy in production.
+      // -----------------------------------------------------------------------
+      if (isBouncePollingEnabled()) {
+        let bounceDetected = false;
+        for (const msg of messages) {
+          if (!msg.id || !msg.internalDate) continue;
+
+          const internalDateMs = parseInt(msg.internalDate, 10);
+          if (internalDateMs <= sentAtMs) continue; // only messages after our send
+
+          const fromHeader =
+            msg.payload?.headers
+              ?.find((h) => h.name?.toLowerCase() === "from")
+              ?.value ?? "";
+
+          // Quick From-header check before fetching the full message body
+          const fromLower = fromHeader.toLowerCase();
+          if (
+            !/\bmailer-daemon\b/.test(fromLower) &&
+            !/\bpostmaster\b/.test(fromLower)
+          ) {
+            continue;
+          }
+
+          // Fetch full message to read body/snippet for confirmation
+          const { data: bounceCandidate } = await gmail.users.messages.get({
+            userId: "me",
+            id: msg.id,
+            format: "full",
+          });
+
+          const bounceBody = bounceCandidate.payload
+            ? (extractPlainText(bounceCandidate.payload as GmailMessagePart) ??
+              bounceCandidate.snippet ??
+              "")
+            : bounceCandidate.snippet ?? "";
+
+          if (!isBounceMessage(fromHeader, bounceBody, contact.contactEmail)) {
+            continue;
+          }
+
+          // Hard bounce confirmed — suppress contact, do NOT mark as replied,
+          // do NOT bump engagement score.
+          await suppressContact(contact._id, "bounced");
+          result.bounced++;
+          bounceDetected = true;
+
+          // Queue a takeover-style alert so the user knows about the bounce
+          const escapedName = htmlEscape(contact.businessName);
+          const escapedEmail = htmlEscape(contact.contactEmail);
+          const bounceBaseUrl = process.env.APP_BASE_URL;
+          const bounceDashboardLink = bounceBaseUrl
+            ? `\n            <p><a href="${encodeURI(`${bounceBaseUrl}/contacts/${contact._id}`)}">Open contact in dashboard</a></p>`
+            : "";
+          alertQueue.push({
+            subject: `Bounce detected: ${contact.businessName}`,
+            htmlBody: `
+              <h2>Bounce detected — ${escapedName}</h2>
+              <p><strong>Email:</strong> ${escapedEmail}</p>
+              <p>A delivery failure notice (mailer-daemon) was found in the Gmail thread for this contact.
+                 The contact has been marked as bounced and added to the suppression list.
+                 Pending drafts and approved emails have been deleted.</p>${bounceDashboardLink}
+            `.trim(),
+          });
+
+          break; // one bounce message per contact is enough
+        }
+
+        if (bounceDetected) continue; // skip reply detection for this contact
+      }
 
       // Find the first GENUINE reply from the contact after our last send.
       // Gmail emoji reactions arrive as thread messages from the contact too, so

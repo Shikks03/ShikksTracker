@@ -68,6 +68,82 @@ const RUN_TIME_BUDGET_MS = 240_000;
 const STALE_SENDING_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
 // ---------------------------------------------------------------------------
+// Bounce detection — send-time classifier
+// ---------------------------------------------------------------------------
+
+/**
+ * GaxiosError shape (googleapis wraps all HTTP errors in this).
+ * Only the fields we inspect are declared here; the actual type has more.
+ */
+interface GaxiosErrorLike {
+  code?: number | string;
+  status?: number | string;
+  errors?: Array<{ domain?: string; reason?: string; message?: string }>;
+  message?: string;
+}
+
+/**
+ * Returns true when a Gmail API send error is unambiguously caused by an
+ * invalid / non-existent recipient address — i.e. a hard bounce.
+ *
+ * Conservative by design: when in doubt, returns false so the normal
+ * revert-to-approved retry path is taken. Only CLEAR invalid-recipient
+ * signals are classified as bounces.
+ *
+ * Signals checked:
+ *  - HTTP 400 + reason "invalidArgument" + message contains address/recipient
+ *    keywords (the Gmail API returns this for bad recipient addresses).
+ *  - HTTP 404 + reason "notFound" + message contains address/recipient keywords
+ *    (occasionally seen for deleted/non-existent Gmail accounts).
+ *
+ * Quota (429), auth (401/403), transient 5xx → returns false (not a bounce).
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function isInvalidRecipientError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as GaxiosErrorLike;
+
+  // Normalise HTTP status to a number
+  const status =
+    typeof e.code === "number"
+      ? e.code
+      : typeof e.status === "number"
+      ? e.status
+      : typeof e.code === "string"
+      ? parseInt(e.code, 10)
+      : typeof e.status === "string"
+      ? parseInt(e.status as string, 10)
+      : NaN;
+
+  // Only 400 and 404 are plausible invalid-recipient statuses.
+  // Everything else (429 quota, 401/403 auth, 5xx transient) is NOT a bounce.
+  if (status !== 400 && status !== 404) return false;
+
+  // Look for invalidArgument or notFound reason in the nested errors array
+  const reasons = (e.errors ?? []).map((x) => (x.reason ?? "").toLowerCase());
+  const hasInvalidArgument = reasons.includes("invalidargument");
+  const hasNotFound = reasons.includes("notfound");
+
+  if (!hasInvalidArgument && !hasNotFound) return false;
+
+  // Require the error message to mention address/recipient to avoid
+  // mis-classifying other 400/404 reasons (e.g. bad threadId) as bounces.
+  const msg = (e.message ?? "").toLowerCase();
+  const RECIPIENT_KEYWORDS = [
+    "recipient",
+    "address",
+    "invalid to",
+    "invalid email",
+    "no such user",
+    "user not found",
+    "does not exist",
+    "mailbox not found",
+  ];
+  return RECIPIENT_KEYWORDS.some((kw) => msg.includes(kw));
+}
+
+// ---------------------------------------------------------------------------
 // Exported pure helpers (unit-testable, no DB)
 // ---------------------------------------------------------------------------
 
@@ -483,8 +559,31 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       returnedThreadId = sendResult.threadId;
       gmailSendSucceeded = true;
     } catch (gmailErr) {
-      // Gmail failed — revert to "approved" so the user can retry after investigation
       const errMsg = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
+
+      // --- Bounce detection (send-time) ---
+      // If the error is unambiguously an invalid recipient, treat as a hard bounce:
+      //   1. Suppress the contact (status → "bounced", nextSendAt → null, draft/approved logs deleted).
+      //   2. Delete the current log (it's in "sending" and must never send).
+      //   3. Return "skipped" — the contact is now inert; no retry needed.
+      // All other Gmail errors → revert to "approved" for normal auto-retry.
+      if (isInvalidRecipientError(gmailErr)) {
+        // Hard bounce — suppress the contact (status → "bounced", pending
+        // draft/approved logs deleted, Suppression entry upserted), then
+        // delete the current log (it is in "sending" and must never send;
+        // suppressContact only deletes draft/approved, not sending logs).
+        const bounceMsg = `bounced: ${errMsg}`;
+        await suppressContact(contact._id, "bounced");
+        await EmailLog.findByIdAndDelete(log._id);
+        return {
+          status: "skipped",
+          contactName: contact.businessName,
+          subject: subjectToSend,
+          error: bounceMsg,
+        };
+      }
+
+      // Gmail failed for a non-bounce reason — revert to "approved" so the user can retry
       await EmailLog.findByIdAndUpdate(log._id, {
         status: "approved",
         sendAttemptedAt: null,
@@ -657,6 +756,7 @@ export interface RunSummary {
   repliesChecked: number;
   replied: number;
   unsubscribed: number;
+  bounced: number;
   draftsCreated: number;
   sent: number;
   skipped: string[];
@@ -720,6 +820,7 @@ export async function runSequenceEngine(): Promise<RunSummary> {
     repliesChecked: repliesResult.checked,
     replied: repliesResult.replied,
     unsubscribed: repliesResult.unsubscribed,
+    bounced: repliesResult.bounced,
     draftsCreated: draftsResult.created,
     sent: sendsResult.sent,
     skipped: sendsResult.skipped,
