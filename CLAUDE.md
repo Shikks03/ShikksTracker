@@ -197,8 +197,8 @@ persist sent state + rfcMessageId → advance contact stage/pipeline/nextSendAt
 - Development workflow (user preference): delegate implementation to Sonnet subagents,
   coordinator reviews per task; commit per phase/feature; skip credential-gated
   verification steps and record them in SESSION_NOTES instead.
-- Verify with `npx tsc --noEmit` + `npm run build` (no test suite yet — creating one is
-  IMPLEMENTATION_PLAN Task 2.1).
+- Verify with `npm test` (vitest, unit tests over the pure lib layer in
+  `src/lib/__tests__/`) + `npx tsc --noEmit` + `npm run build`.
 
 ## Known constraints & gotchas
 
@@ -220,12 +220,16 @@ persist sent state + rfcMessageId → advance contact stage/pipeline/nextSendAt
   superseded: `/compose` and `POST /api/email-logs` create logs **directly as
   `approved`** — the gate applies to AI-generated drafts, manual composes are
   self-approved by authorship.
-- The "auto-add to Suppression on unsubscribed/bounced status change" convention is
-  **implemented only in the reply-detection path**; manual PATCHes bypass it, and bounce
-  detection doesn't exist at all (GAPS #4–#6; deployment.md overstates both).
-- Opt-out matching includes bare `\bstop\b` — known false-positive hazard (GAPS #3).
-- Send state is not atomic across Gmail send + DB update — duplicate-send window exists
-  (GAPS #2). Fix planned before real-volume sending.
+- ~~Suppression/bounce/opt-out/atomicity gaps~~ **RESOLVED 2026-07-10** (plan Phases 2–3):
+  suppression is now checked at send AND draft time; manual unsubscribed/bounced PATCHes
+  auto-add via `suppressContact` (`src/lib/contacts.ts`); bounce detection exists
+  (send-time classifier + mailer-daemon poll scan, `BOUNCE_POLL_DETECTION` env-gated);
+  opt-out matching is intent-anchored (bare "stop" mid-sentence = normal reply — see the
+  asymmetry rationale in `replies.ts`); sends are idempotent via an atomic
+  approved→"sending" claim, post-send failures revert to draft for human review, and a
+  stale-"sending" sweep runs at the start of each engine run. NOTE: the takeover alert
+  documented since phase 12 **never actually existed in code** until 2026-07-10 — it now
+  does (reply + opt-out + bounce alerts, queued, sent last, dashboard links).
 - `EmailLog` has **no timestamps**; ordering relies on `_id`.
 - Frontend duplicates design tokens and an `apiFetch` helper per page, and hardcodes
   `HOT_THRESHOLD = 5` in three pages (backend reads `HOT_LEAD_THRESHOLD` env) — keep in

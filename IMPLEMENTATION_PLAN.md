@@ -110,7 +110,7 @@ committed, no client-side env exposure. Remaining work splits cleanly:
   ("In production", not "Testing"), otherwise the Gmail refresh token expires every
   7 days (G-22).
 
-## Phase 2 — Test harness (G-4.1) — BLOCKS Phase 3
+## Phase 2 — Test harness (G-4.1) — BLOCKS Phase 3 — ✅ DONE 2026-07-10 (commit f283db9; 164 baseline tests, grown to 235 by end of Phase 3)
 
 ### Task 2.1 — Vitest + unit tests for the pure layer
 - Add `vitest` (devDependency) + `"test": "vitest run"` script. No React testing needed;
@@ -133,7 +133,17 @@ committed, no client-side env exposure. Remaining work splits cleanly:
   - `draft.ts`: `bodyToHtml` (if kept — see Task 5.4).
 - **Files:** `src/lib/__tests__/*.test.ts`, `package.json`, `vitest.config.ts`.
 
-## Phase 3 — Correctness & compliance (G-2.x) — requires Phase 2
+## Phase 3 — Correctness & compliance (G-2.x) — requires Phase 2 — ✅ DONE 2026-07-10
+
+> All seven tasks landed on branch `remediation-phases-2-3` (commits a53f59b…300c5d7,
+> merged to main). Notable deviations/discoveries: (a) Next steps for 3.1 — post-send
+> failures go to "draft" for human review, never auto-retry (reviewer catch); (b) 3.2 —
+> the takeover alert described in SESSION_NOTES phase 12 NEVER EXISTED in code; Task 3.2
+> built the full alert queue (reply + opt-out + bounce alerts, dashboard links) from
+> scratch; (c) 3.2 — Tagalog opt-out patterns deliberately excluded (TODO in replies.ts);
+> (d) 3.5 — poll-time bounce scan gated by BOUNCE_POLL_DETECTION (default on).
+> Task 5.3's docs-truth pass should now update deployment.md §6.4/§7 to describe the
+> REAL bounce + suppression-at-send behavior (both exist now).
 
 ### Task 3.1 — Make sending idempotent (G-2.1)
 - In `sendOneLog` (`src/lib/sequence.ts`):

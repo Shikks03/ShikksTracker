@@ -59,6 +59,30 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
 - **2026-07-04** — All 14 phases implemented in one session (Sonnet implementer subagents, per-phase spec+quality review by coordinator). Notable review catches fixed along the way: failed-connection caching in db.ts, literal `To: me` header in test-send, draft-cap starvation + approved-queue head-of-line blocking in the sequence engine, campaignId ObjectId cast in the stats aggregation. Everything verified via tsc + production build (27 routes); anything needing live credentials is deferred to the user actions above.
 - **2026-07-05** — Full UI redesign to the "Editorial Terminal" design (option 4a in `design reference/` — that handoff README + screenshots are the visual source of truth). Same workflow: Sonnet implementer subagents, per-page review by coordinator. New: 3 Google fonts (Instrument Serif / Familjen Grotesk / JetBrains Mono), Tailwind v4 `@theme` color tokens, dark 238px `Sidebar` (replaces NavBar) with live draft badge + next-send countdown, shared primitives in `src/components/ui.tsx`, lucide-react. All six pages rebuilt (dashboard groups + priority panels, one-draft-at-a-time review queue with A/E/J keys + "approve all safe" = non-hot bulk approve, contact conversation thread + pipeline checklist, campaign funnel strips, import dropzone + result tiles persisted to localStorage, suppression flat table with confirm-gated remove). Backend additions the design required: EmailLog `replyBody`/`replySnippet` persisted by reply detection; contacts `stats=true` aggregation now returns `repliedAt`/`replySnippet`/`lastLogStage`/`lastLogStatus`. Behavior/API contracts otherwise unchanged; old status filter dropdown dropped per design. Review catches fixed: engagement sort now defaults on, import upload errors surfaced (were swallowed silently), Up Next rail bg per spec. Verified via production build; visual QA against a live DB still pending the credential setup above. Identity hardcoded as "Shikks" (greeting varies umaga/hapon/gabi by Manila time).
 - **2026-07-05 (later)** — Comfortable density pass applied app-wide (spec: docs/superpowers/specs/2026-07-05-comfortable-density-redesign.md, plan: docs/superpowers/plans/2026-07-05-comfortable-density-pass.md). User verdict on the Editorial Terminal redesign was "too compact"; interview calibrated to Comfortable density (type +15–20%, roomier padding, 40px tiles), full-bleed kept, sidebar widened 238→268px, subtle panel shadows + 130–150ms hover transitions + one 200ms fade-up per page (prefers-reduced-motion respected). Mechanical old→new mapping tables in the plan; Sonnet implementer subagents per file, coordinator-reviewed diffs. Coordinator fixes on top: dashboard marginTop 22→30, import numeric paddings 3→4/12→16, search-icon input insets aligned to new padding (left 14 / paddingLeft 36), campaigns paddingRight 8→10. Verified: production build clean, lint at pre-existing baseline (25 problems, none new), all five routes 200 with page-enter on the user's live dev server. Visual QA with real data still pending credential setup.
+- **2026-07-10** — **Remediation Phases 2–3 implemented** on branch
+  `remediation-phases-2-3` (10 commits f283db9…300c5d7, merged to main; same
+  Opus-orchestrator + Sonnet-implementer workflow, per-task diff review).
+  **Phase 2:** vitest harness, 164 baseline unit tests pinning current behavior of the
+  pure lib layer (sequence/replies/compose/tracking/csv/gmail/draft). **Phase 3, all
+  seven tasks:** (3.1) idempotent sending — atomic approved→"sending" claim before
+  Gmail, revert-to-approved on pre-send failure, revert-to-DRAFT on post-send failure
+  (reviewer catch: auto-retry after a successful send would duplicate), stale-sending
+  sweep at run start; EmailLog gains sending status + sendAttemptedAt/sendErrorCount/
+  lastSendError. (3.2) intent-anchored opt-out matching replaces `\bstop\b` (whole-
+  message equality + explicit intent phrases; Tagalog TODO deliberately excluded);
+  **discovery: the phase-12 takeover alert never existed in code** — full alert queue
+  built (reply/opt-out/bounce subjects, HTML-escaped, dashboard links, queued and sent
+  last). (3.3) suppression enforced in sendOneLog + generateDrafts. (3.4) shared
+  `suppressContact` helper in lib/contacts.ts; contacts PATCH auto-adds Suppression on
+  unsubscribed/bounced. (3.5) minimal bounce detection: conservative send-time
+  classifier (`isInvalidRecipientError`) + mailer-daemon/postmaster poll scan
+  (`BOUNCE_POLL_DETECTION`, default on). (3.6) campaign delete 409-guards on
+  referencing contacts; contact delete cascades EmailLogs. (3.7) countdown hook
+  aligned to engine window (<18); From-header equality matching via
+  `extractFromAddress`; stats aggregation enum whitelists; queue-time placeholder
+  substitution removed (send-time is the single path). Verified: 235 unit tests, tsc,
+  production build all green. Remaining plan phases: 4 (observability — needs the
+  Vercel-plan answer for Task 4.2), 5 (maintainability + docs truth pass), 6 (product).
 - **2026-07-08** — **Security Phase 1 (auth + API hardening) implemented** on branch
   `security-phase-1` per IMPLEMENTATION_PLAN Tasks 1.2–1.4 (Opus orchestrator/validator,
   Sonnet implementer subagents; per-task diff review). (1) App-level auth: required

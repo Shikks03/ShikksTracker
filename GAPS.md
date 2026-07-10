@@ -12,21 +12,21 @@ against code. No changes were made to source files.
 | # | Gap | Area |
 |---|-----|------|
 | 1 | ~~No authentication on dashboard or mutating API routes~~ **RESOLVED 2026-07-08** (Plan Tasks 1.2–1.4, branch `security-phase-1`) | Security |
-| 2 | Non-atomic send: Gmail success + DB failure ⇒ duplicate sends | Correctness |
-| 3 | Opt-out keyword false positives (`\bstop\b`) wrongly unsubscribe engaged leads | Correctness / Compliance |
-| 4 | Suppression list is NOT checked at send time | Compliance |
-| 5 | Manual status change to `unsubscribed`/`bounced` does not add to Suppression | Compliance |
-| 6 | Bounce detection does not exist (docs claim it does) | Correctness / Docs drift |
-| 7 | Campaign/Contact deletes leave orphans; orphaned contacts error forever in cron | Data integrity |
-| 8 | Zero tests, including for the pure helpers designed to be testable | Quality |
+| 2 | ~~Non-atomic send ⇒ duplicate sends~~ **RESOLVED 2026-07-10** (Task 3.1: atomic claim → "sending" state, post-send failures → draft for human review, stale sweep) | Correctness |
+| 3 | ~~Opt-out keyword false positives~~ **RESOLVED 2026-07-10** (Task 3.2: intent-anchored matcher; opt-outs now also fire takeover alerts) | Correctness / Compliance |
+| 4 | ~~Suppression not checked at send time~~ **RESOLVED 2026-07-10** (Task 3.3: checked in sendOneLog + generateDrafts) | Compliance |
+| 5 | ~~Manual unsubscribed/bounced bypasses Suppression~~ **RESOLVED 2026-07-10** (Task 3.4: shared suppressContact helper, PATCH auto-adds) | Compliance |
+| 6 | ~~Bounce detection does not exist~~ **RESOLVED 2026-07-10** (Task 3.5: send-time classifier + mailer-daemon poll scan, env-gated) | Correctness / Docs drift |
+| 7 | ~~Delete orphans~~ **RESOLVED 2026-07-10** (Task 3.6: campaign delete 409-guards on contacts; contact delete cascades logs) | Data integrity |
+| 8 | ~~Zero tests~~ **RESOLVED 2026-07-10** (Task 2.1: vitest, 235 unit tests over the pure lib layer) | Quality |
 | 9 | No observability: cron errors are returned to a pinger nobody reads | Reliability |
 | 10 | Serverless send loop sleeps 30–60 s between sends; Vercel-plan timeout risk | Architecture |
 | 11 | `/api/send-batch` has no inter-send throttle (burst risk during warm-up) | Deliverability |
 | 12 | Regex injection / ReDoS in suppressions search (`$regex` from query string) | Security |
 | 13 | Mass-assignment style `Model.create(body)` on campaigns & suppressions | Security / Validation |
 | 14 | Unauthenticated public tracking + OAuth endpoints (DoS, score inflation, missing OAuth `state`) | Security |
-| 15 | Daily-cap race between cron and manual send-batch | Correctness (minor) |
-| 16 | Send-window off-by-one between UI countdown (≤18) and engine (<18) | Correctness (minor) |
+| 15 | Daily-cap race between cron and manual send-batch — **mostly closed 2026-07-10** by Task 3.1's atomic claim (same log can't double-send; theoretical cap overshoot of 1–2 within a race window remains) | Correctness (minor) |
+| 16 | ~~Send-window off-by-one~~ **RESOLVED 2026-07-10** (Task 3.7: countdown hook aligned to engine `< 18`) | Correctness (minor) |
 | 17 | No pagination; contacts aggregation `$lookup`s all logs | Scalability |
 | 18 | Frontend duplication: `apiFetch`, design tokens, `HOT_THRESHOLD`, `envInt` | Maintainability |
 | 19 | Docs drift: README scoring numbers, "regenerate drafts", deployment.md bounce claims | Docs |
