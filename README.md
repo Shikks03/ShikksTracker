@@ -6,11 +6,11 @@ A self-hosted tool for automating cold-email outreach to Philippine small busine
 
 ## Features
 
-- **Contact management** — manual entry or CSV import with automatic suppression-list checking (duplicates and opt-outs are skipped on import)
+- **Contact management** — manual entry or CSV import with automatic suppression-list checking (duplicates and opt-outs are skipped on import, and the suppression list is re-checked at draft generation and at send time so an address suppressed mid-sequence is never emailed)
 - **AI-drafted sequences** — Claude API writes each of the 3 emails (initial + 2 follow-ups) from your offer summary and per-contact key points
 - **Review gate** — every draft must be approved before it enters the send queue; you read every email before it goes out
 - **Open / click / reply tracking** — 1x1 tracking pixel, redirecting link wrapper, and hourly Gmail inbox polling
-- **Lead scoring** — engagement score increments on open (+1), click (+2), reply (+3); hot leads flagged at score >= 5
+- **Lead scoring** — engagement score increments on open (+1), click (+3), reply (+10); hot leads flagged at score >= 5
 - **Pipeline** — per-contact stage (not started → contacted → replied → call booked → proposal sent → won / lost) updated automatically or manually
 - **Takeover alert** — on first reply the sequence auto-stops and you receive an immediate email-to-self alert so you can respond personally
 

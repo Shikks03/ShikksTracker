@@ -32,6 +32,7 @@ Single-user, self-hosted cold-email outreach tool for Philippine small businesse
 - **EmailLog** — `contactId`, `campaignId`, `stage: 1–3`, `subject`, `body`, `gmailThreadId`, `gmailMessageId`, `sentAt`, `trackingPixelId`, `openCount`/`firstOpenedAt`, `links: [{ url, trackingId }]`, `clickCount`/`firstClickedAt`, `replied`/`repliedAt`
   - **Amendment for the review gate:** add `status: "draft" | "approved" | "sent"`. `sentAt`, Gmail IDs, and tracking fields are populated only at send time.
   - **Amendment (phase 6):** also has `rfcMessageId` — the RFC-2822 `Message-ID` header fetched after send (NOT the Gmail API id); required for `In-Reply-To`/`References` threading of follow-ups.
+  - **Amendment (2026-07-10, Task 3.1):** status enum gains `"sending"` (draft → approved → **sending** → sent), a transient claim state set atomically before the Gmail call to prevent duplicate sends. Also adds `sendAttemptedAt` (Date, set on claim), `sendErrorCount` (Number), `lastSendError` (String). A stale-`sending` sweep at the start of each engine run reverts logs stuck > 10 min to `"draft"` for human verification.
 - **Suppression** — `email` (indexed, lowercase-normalized), `reason: "unsubscribed" | "bounced" | "manual"`, `addedAt`
 
 ## Review Gate (amendment to SPEC.md §5–6)
@@ -40,12 +41,12 @@ The sequence engine is split into two steps instead of generate-and-send in one 
 
 1. **Draft generation (cron):** for due contacts (`status: "active"`, `nextSendAt <= now`), call Claude and store the EmailLog as `status: "draft"`. Do not advance `currentStage` yet.
 2. **Approval (manual):** dashboard review queue — user edits/approves drafts, flipping them to `"approved"`.
-3. **Send (cron):** each run sends `"approved"` logs (respecting the daily cap, throttle, and send window), marks them `"sent"`, advances `currentStage`, sets `pipelineStage: "contacted"` on stage 1, and computes the next `nextSendAt`.
+3. **Send (cron):** each run sends `"approved"` logs (respecting the daily cap, throttle, and send window). Each send atomically claims the log (`approved → "sending"`) before touching Gmail; on success marks it `"sent"`, advances `currentStage`, sets `pipelineStage: "contacted"` on stage 1, and computes the next `nextSendAt`. Pre-send Gmail failures revert to `"approved"` (auto-retry); post-send failures revert to `"draft"` (human verifies in Gmail Sent — never auto-retry a possibly-delivered email); clear invalid-recipient errors are treated as bounces (suppress + `"bounced"`). Suppression is re-checked here and at draft generation.
 
 ## Key Conventions
 
-- **Cron endpoint** (`/api/cron/...`): protected by a `CRON_SECRET` header check. Each run: reply-check first, then draft generation, then approved sends.
-- **Reply detection:** poll `users.threads.get` for active contacts with a `gmailThreadId`. On reply: `status: "replied"`, `pipelineStage: "replied"`, clear `nextSendAt`, `+10` score, fire the takeover alert. Opt-out keywords ("STOP", "unsubscribe") → `status: "unsubscribed"` + Suppression entry instead.
+- **Cron endpoint** (`/api/cron/...`): protected by a `CRON_SECRET` header check. Each run: **stale-sending sweep first** (Task 3.1), then reply-check, then draft generation, then approved sends.
+- **Reply detection:** poll `users.threads.get` for active contacts with a `gmailThreadId`. A bounce pre-pass runs first (mailer-daemon/postmaster message naming the contact → suppress + `"bounced"` + alert, no reply/score). On reply: `status: "replied"`, `pipelineStage: "replied"`, clear `nextSendAt`, `+10` score, fire the takeover alert. Opt-out replies (intent-anchored match, NOT bare "stop" — see `replies.ts` asymmetry rationale) → `status: "unsubscribed"` + Suppression entry + **its own takeover alert** (so misfires are auditable). From-header matching is exact-address equality via `extractFromAddress`, not substring. **Note:** the takeover alert queue itself was built 2026-07-10 (Task 3.2) — it did not exist before, despite earlier docs claiming it did.
 - **Takeover alert** (email-to-self) fires **last** in the reply-detection step so a failure elsewhere never skips it.
 - **Threading:** build raw MIME with `In-Reply-To` / `References` headers so follow-ups stay in the original Gmail thread.
 - **Throttling:** random 30–90 s delay between sends in a batch; hard cap 15 sends/day; send only 8am–6pm Asia/Manila. Excess due sends defer to the next run.
@@ -76,7 +77,8 @@ TELEGRAM_CHAT_ID=
 
 # Optional tuning (defaults): ANTHROPIC_MODEL=claude-sonnet-4-6, DAILY_SEND_CAP=15,
 # SENDS_PER_RUN=3, DRAFTS_PER_RUN=10, SEND_DELAY_MIN_MS=30000, SEND_DELAY_MAX_MS=60000,
-# HOT_LEAD_THRESHOLD=5
+# HOT_LEAD_THRESHOLD=5, BOUNCE_POLL_DETECTION=true (set "false" to disable the
+# mailer-daemon poll-time bounce scan; send-time bounce classification always runs)
 ```
 
 ## Non-Goals (v1)
@@ -116,29 +118,38 @@ src/
     auth.ts            requireCronSecret (x-cron-secret header check)
     gmail.ts           OAuth2 client, raw RFC-2822 builder, sendGmailMessage, sleep/randomDelay
     draft.ts           Claude draft generation (forced tool use), bodyToHtml
-    sequence.ts        THE ENGINE: run = checkReplies → generateDrafts → sendApproved;
-                       sendOneLog (shared with manual send); Manila time helpers
+    sequence.ts        THE ENGINE: run = sweepStaleSending → checkReplies → generateDrafts
+                       → sendApproved; sendOneLog (atomic claim, shared with manual send);
+                       isStaleSending/isInvalidRecipientError helpers; Manila time helpers
+    session.ts         edge-safe HMAC session token create/verify (Web Crypto) — dashboard auth
     replies.ts         thread polling, opt-out detection, takeover alerts (queued, sent last)
     tracking.ts        URL tokenizer, renderTrackedHtml (pixel + click-link rewrite)
     scoring.ts         SCORE_OPEN/CLICK/REPLY consts + bumpEngagement ($inc)
     compose.ts         applyPlaceholders ({{businessName}}/{{contactName}}, fallback "there")
-    contacts.ts        createContactChecked (single creation path: validate→suppress→dupe→insert)
+    contacts.ts        createContactChecked (validate→suppress→dupe→insert) + suppressContact
+                       (shared suppress helper: Suppression upsert + status + delete pending logs)
     csv.ts             parseContactsCsv (papaparse, case-insensitive headers)
     api.ts             handleError (mongoose→HTTP mapping), notFound
-  app/api/           Route handlers. UNAUTHENTICATED except cron/* and test/* (see GAPS #1):
-    contacts[, /[id], /import]      CRUD + CSV/JSON import (stats=true → $lookup aggregation)
-    campaigns[, /[id], /[id]/stats] CRUD + funnel/pipeline aggregations
-    email-logs[, /[id], /batch]     list/create-approved; PATCH draft↔approved, sent immutable
+  app/api/           Route handlers. Session-cookie auth via src/proxy.ts middleware (2026-07-08);
+                     public exceptions: track/*, cron/*, test/*, health, auth/login (GAPS #1 fixed):
+    contacts[, /[id], /import]      CRUD + CSV/JSON import (stats=true → $lookup aggregation);
+                                    PATCH unsubscribed/bounced auto-suppresses; DELETE cascades logs
+    campaigns[, /[id], /[id]/stats] CRUD + funnel/pipeline aggregations; DELETE 409s if contacts ref it
+    email-logs[, /[id], /batch]     list/create-approved; PATCH draft↔approved, sent+sending immutable
+    auth/login                      POST password → HMAC session cookie (Phase 1)
     send-batch                      manual send of chosen approved logs (cap yes, window no)
     cron/sequence, cron/check-replies   engine entry points (CRON_SECRET)
     track/open/[pixelId], track/click/[trackingId]   public tracking
-    auth/gmail[, /callback]         one-time OAuth bootstrap (dev tool, renders token)
+    auth/gmail[, /callback]         one-time OAuth bootstrap (dev tool; 404 outside dev unless ALLOW_OAUTH_BOOTSTRAP)
     test/send-self, test/generate-draft  smoke tests (CRON_SECRET)
     stats/lead-sources, health
   app/               Pages (all "use client"): / dashboard, /review, /compose, /import,
                      /campaigns, /contacts/[id], /suppressions
   components/        Sidebar (dark, live draft badge), ui.tsx (design primitives),
                      StatusBadge, useNextSendCountdown
+  proxy.ts           Next 16 middleware (was middleware.ts): session-cookie auth gate
+  app/login/         password login page (Phase 1)
+  lib/__tests__/     vitest unit tests for the pure lib layer (235 tests, `npm test`)
 docs/                gmail-setup, cron-setup, deployment runbook, design brief,
                      superpowers/ (feature specs+plans by date)
 design reference/    Editorial Terminal design handoff — visual source of truth (untracked)
@@ -149,21 +160,28 @@ GAPS.md              ranked audit findings · IMPLEMENTATION_PLAN.md  remediatio
 ## Data Flow (one engine run)
 
 External pinger → `GET/POST /api/cron/sequence` (x-cron-secret) → `runSequenceEngine()`:
-1. **checkReplies** — for each active contact's latest sent thread, find first genuine
-   contact message newer than our send (skips Gmail emoji reactions); opt-out keyword →
-   unsubscribe + Suppression, else → replied + score +10 + queued takeover alert
-   (alerts sent only after ALL state transitions).
-2. **generateDrafts** — contacts with `nextSendAt <= now`, `currentStage < 3`: Claude
-   drafts stage `currentStage+1` as `status:"draft"` (idempotent per contact+stage; cap
-   DRAFTS_PER_RUN).
+0. **sweepStaleSending** (Task 3.1) — any log stuck in `"sending"` > 10 min reverts to
+   `"draft"` with a human-verify note (interrupted send; never auto-retried).
+1. **checkReplies** — for each active contact's latest sent thread: bounce pre-pass first
+   (mailer-daemon/postmaster naming the contact → suppress + `"bounced"` + alert), then
+   find first genuine contact message newer than our send (exact From-address match via
+   `extractFromAddress`; skips Gmail emoji reactions); opt-out (intent-anchored) →
+   unsubscribe + Suppression + alert, else → replied + score +10 + alert. All alerts
+   queued and sent only after ALL state transitions.
+2. **generateDrafts** — contacts with `nextSendAt <= now`, `currentStage < 3`: skip if
+   suppressed (unsubscribe + clear); else Claude drafts stage `currentStage+1` as
+   `status:"draft"` (idempotent per contact+stage, incl. `"sending"`; cap DRAFTS_PER_RUN).
 3. **sendApproved** — inside 8–18h Manila window, under 15/day Manila-day cap, max
    SENDS_PER_RUN, 30–60 s sleep between sends, 240 s run budget → `sendOneLog` per log.
 
-`sendOneLog` (also used by `/api/send-batch`): load contact+campaign (revert log to
-draft if inactive/missing) → threading headers from prior logs' `rfcMessageId` →
-placeholder substitution → tracking rewrite (pixel + click links) → Gmail send →
-persist sent state + rfcMessageId → advance contact stage/pipeline/nextSendAt
-(spacing anchored to stage-1 `sentAt`).
+`sendOneLog` (also used by `/api/send-batch`): **atomically claim `approved → "sending"`**
+(skip if not claimed — no double-send) → load contact+campaign (revert to `"draft"` if
+inactive/missing) → suppression check (suppressed → unsubscribe + delete log, never send)
+→ threading headers from prior logs' `rfcMessageId` → placeholder substitution → tracking
+rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/pipeline/nextSendAt
+(spacing anchored to stage-1 `sentAt`). Failure handling: pre-send Gmail error → `"approved"`
+(retry) unless it's a clear invalid-recipient (→ bounce + suppress); post-send error →
+`"draft"` (human verifies; possibly-delivered email is never auto-resent).
 
 ## Why it's built this way (rationale worth preserving)
 
