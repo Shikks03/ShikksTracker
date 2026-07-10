@@ -351,6 +351,10 @@ export async function checkReplies(): Promise<RepliesResult> {
         const escapedName = htmlEscape(contact.businessName);
         const escapedEmail = htmlEscape(contact.contactEmail);
         const escapedSnippet = optOutClean ? htmlEscape(makeSnippet(optOutClean) ?? "") : "";
+        const optOutBaseUrl = process.env.APP_BASE_URL;
+        const optOutDashboardLink = optOutBaseUrl
+          ? `\n            <p><a href="${encodeURI(`${optOutBaseUrl}/contacts/${contact._id}`)}">Open contact in dashboard</a></p>`
+          : "";
         alertQueue.push({
           subject: `Opt-out from ${contact.businessName}`,
           htmlBody: `
@@ -360,7 +364,7 @@ export async function checkReplies(): Promise<RepliesResult> {
             <p>The contact has been unsubscribed and added to the suppression list.
                If this looks like a false positive (e.g. the phrase was not a real opt-out),
                you can manually re-activate the contact and remove the suppression entry
-               from the dashboard.</p>
+               from the dashboard.</p>${optOutDashboardLink}
           `.trim(),
         });
       } else {
@@ -398,13 +402,17 @@ export async function checkReplies(): Promise<RepliesResult> {
         const escapedName = htmlEscape(contact.businessName);
         const escapedEmail = htmlEscape(contact.contactEmail);
         const escapedSnippet = replyClean ? htmlEscape(makeSnippet(replyClean) ?? "") : "";
+        const replyBaseUrl = process.env.APP_BASE_URL;
+        const replyDashboardLink = replyBaseUrl
+          ? `\n            <p><a href="${encodeURI(`${replyBaseUrl}/contacts/${contact._id}`)}">Open contact in dashboard</a></p>`
+          : "";
         alertQueue.push({
           subject: `Reply from ${contact.businessName}`,
           htmlBody: `
             <h2>New reply — ${escapedName}</h2>
             <p><strong>Email:</strong> ${escapedEmail}</p>
             <p><strong>Message snippet:</strong> ${escapedSnippet || "(no preview available)"}</p>
-            <p>Log in to the dashboard to view the full thread and move this lead forward.</p>
+            <p>Log in to the dashboard to view the full thread and move this lead forward.</p>${replyDashboardLink}
           `.trim(),
         });
       }
