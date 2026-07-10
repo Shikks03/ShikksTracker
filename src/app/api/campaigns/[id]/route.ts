@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Campaign from "@/models/Campaign";
+import Contact from "@/models/Contact";
 import { handleError, notFound } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,17 @@ export async function DELETE(
   try {
     await connectDB();
     const { id } = await params;
+
+    const contactCount = await Contact.countDocuments({ campaignId: id });
+    if (contactCount > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot delete: ${contactCount} contact${contactCount === 1 ? "" : "s"} still reference this campaign. Delete or move those contacts first.`,
+        },
+        { status: 409 }
+      );
+    }
+
     const campaign = await Campaign.findByIdAndDelete(id).lean();
     if (!campaign) return notFound(id);
     return NextResponse.json({ deleted: true });

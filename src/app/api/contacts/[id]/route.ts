@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
+import EmailLog from "@/models/EmailLog";
 import { handleError, notFound } from "@/lib/api";
 import { suppressContact } from "@/lib/contacts";
 
@@ -98,7 +99,8 @@ export async function DELETE(
     const { id } = await params;
     const contact = await Contact.findByIdAndDelete(id).lean();
     if (!contact) return notFound(id);
-    return NextResponse.json({ deleted: true });
+    const { deletedCount } = await EmailLog.deleteMany({ contactId: id });
+    return NextResponse.json({ deleted: true, logsDeleted: deletedCount ?? 0 });
   } catch (err) {
     return handleError(err);
   }
