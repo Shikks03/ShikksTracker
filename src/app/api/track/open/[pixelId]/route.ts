@@ -64,12 +64,13 @@ export async function GET(
     ).select({ contactId: 1, firstOpenedAt: 1 });
 
     if (log) {
-      // Set firstOpenedAt only on the first open (when it was null before).
+      // Set firstOpenedAt only on the first open. The `firstOpenedAt: null`
+      // filter makes this atomic: if two pixel hits race, only the one that
+      // finds it still null writes the timestamp (the other matches nothing).
       if (!log.firstOpenedAt) {
-        await EmailLog.findByIdAndUpdate(
-          log._id,
+        await EmailLog.updateOne(
+          { _id: log._id, firstOpenedAt: null },
           { firstOpenedAt: now },
-          // Conditional: only write if still null (guards against a race).
           { timestamps: false }
         );
       }

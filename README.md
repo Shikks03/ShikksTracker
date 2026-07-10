@@ -49,7 +49,8 @@ App is available at `http://localhost:3000`.
 | `/` | Dashboard — campaign stats, recent activity |
 | `/contacts/[id]` | Contact detail — email log, pipeline stage, engagement score |
 | `/campaigns` | Campaign list and creation |
-| `/review` | Draft review queue — approve or regenerate drafts before sending |
+| `/review` | Draft review queue — approve, edit, or discard drafts before sending |
+| `/compose` | Manual compose — write a one-off email to selected contacts (queued as approved) |
 | `/import` | CSV import with suppression-check summary |
 | `/suppressions` | Suppression list management |
 

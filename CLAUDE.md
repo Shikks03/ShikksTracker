@@ -119,7 +119,9 @@ src/
     db.ts              cached mongoose connect (global promise, cleared on failure)
     auth.ts            requireCronSecret (x-cron-secret header check)
     gmail.ts           OAuth2 client, raw RFC-2822 builder, sendGmailMessage, sleep/randomDelay
-    draft.ts           Claude draft generation (forced tool use), bodyToHtml
+    draft.ts           Claude draft generation (forced tool use)
+    env.ts             envInt (shared by sequence.ts + contacts/send-batch routes)
+    client.ts          client-side apiFetch<T> + HOT_THRESHOLD (used by all pages)
     sequence.ts        THE ENGINE: run = sweepStaleSending → checkReplies → generateDrafts
                        → sendApproved; sendOneLog (atomic claim, shared with manual send);
                        isStaleSending/isInvalidRecipientError helpers; Manila time helpers
@@ -148,10 +150,11 @@ src/
   app/               Pages (all "use client"): / dashboard, /review, /compose, /import,
                      /campaigns, /contacts/[id], /suppressions
   components/        Sidebar (dark, live draft badge), ui.tsx (design primitives),
-                     StatusBadge, useNextSendCountdown
+                     tokens.ts (shared fonts+palette — single source), StatusBadge,
+                     useNextSendCountdown
   proxy.ts           Next 16 middleware (was middleware.ts): session-cookie auth gate
   app/login/         password login page (Phase 1)
-  lib/__tests__/     vitest unit tests for the pure lib layer (235 tests, `npm test`)
+  lib/__tests__/     vitest unit tests for the pure lib layer (221 tests, `npm test`)
 docs/                gmail-setup, cron-setup, deployment runbook, design brief,
                      superpowers/ (feature specs+plans by date)
 design reference/    Editorial Terminal design handoff — visual source of truth (untracked)
@@ -258,12 +261,18 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
   stale-"sending" sweep runs at the start of each engine run. NOTE: the takeover alert
   documented since phase 12 **never actually existed in code** until 2026-07-10 — it now
   does (reply + opt-out + bounce alerts, queued, sent last, dashboard links).
-- `EmailLog` has **no timestamps**; ordering relies on `_id`.
-- Frontend duplicates design tokens and an `apiFetch` helper per page, and hardcodes
-  `HOT_THRESHOLD = 5` in three pages (backend reads `HOT_LEAD_THRESHOLD` env) — keep in
-  sync manually until IMPLEMENTATION_PLAN Task 5.1 consolidates.
-- Docs drift: README scoring numbers and "regenerate drafts" are wrong; treat code as
-  truth, SPEC.md for intent, SESSION_NOTES.md for the change narrative.
+- `EmailLog` now has a `createdAt` timestamp (Task 5.2, `{ timestamps: { createdAt:
+  true, updatedAt: false } }`); docs created before 2026-07-11 simply lack it, so still
+  fall back to `_id` order for those.
+- ~~Frontend token/apiFetch/HOT_THRESHOLD/envInt duplication~~ **RESOLVED 2026-07-11**
+  (Task 5.1): design tokens live in `src/components/tokens.ts`, the client `apiFetch<T>`
+  + `HOT_THRESHOLD` in `src/lib/client.ts`, `envInt` in `src/lib/env.ts` — all pages/
+  routes import these. The two forest greens are named distinctly (`FOREST_ACTION`
+  #1C4B3A button vs `FOREST_WON` #1C6E3A pipeline). UI hot threshold reads
+  `NEXT_PUBLIC_HOT_LEAD_THRESHOLD` — keep it in sync with the server `HOT_LEAD_THRESHOLD`.
+- Docs drift: mostly reconciled through 2026-07-11 (README scoring is +1/+3/+10,
+  "regenerate" removed, `/compose` listed). Treat code as truth, SPEC.md for intent,
+  SESSION_NOTES.md for the change narrative.
 - Local-workspace dirs (`tools/`, `graphify-out/`, `.planning/`, `design reference/`)
   are gitignored as of 2026-07-08. Note: `design reference/` is the visual source of
   truth for the UI — it is deliberately local-only; remove its `.gitignore` line if the
@@ -275,7 +284,10 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
 > "security checklist", "check my keys", or similar — open this section and walk through
 > it step by step, checking off what's done.** Verified facts as of the audit (don't
 > re-audit): no secrets in any of the 55 commits or the working tree; `.env.local`
-> gitignored and never committed; all env reads server-side; no `NEXT_PUBLIC_` vars.
+> gitignored and never committed; all env reads server-side. The lone `NEXT_PUBLIC_`
+> var is `NEXT_PUBLIC_HOT_LEAD_THRESHOLD` (added 2026-07-11, Task 5.1) — a non-secret
+> integer that mirrors the server `HOT_LEAD_THRESHOLD` for UI highlighting; no secret is
+> ever exposed to the client.
 
 ### A. Before / during deploy (in order)
 
