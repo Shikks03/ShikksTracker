@@ -237,7 +237,13 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
   `SENDS_PER_RUN=1` default with no inter-send sleep in the cron path keeps a single
   run well within 60 s.
 - `/api/send-batch` enforces the daily cap but **intentionally not** the send window
-  (user-initiated sends are allowed anytime); it currently has no inter-send throttle.
+  (user-initiated sends are allowed anytime). It is capped at `SEND_BATCH_MAX` (default 5)
+  logs per request (Task 4.3); the review UI chunks larger selections and spaces the
+  chunks with a short client-side delay, so there is no long in-function sleep.
+- **Observability (Task 4.1):** each engine run writes a `CronRun` doc (30-day TTL);
+  the dashboard shows a last-run strip with a PINGER-STALE warning, and the engine emails
+  a self-digest on errors (throttled to one per Manila day). `GET /api/cron-runs` powers
+  the strip (auth-protected).
 - The Review Gate statement above ("drafts require approval") is now partially
   superseded: `/compose` and `POST /api/email-logs` create logs **directly as
   `approved`** — the gate applies to AI-generated drafts, manual composes are

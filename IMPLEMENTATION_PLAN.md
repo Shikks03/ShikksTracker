@@ -230,7 +230,15 @@ committed, no client-side env exposure. Remaining work splits cleanly:
   send-time substitution as the single path — it's already case-insensitive and
   documented as path-independent). Verify compose UI preview text still makes sense.
 
-## Phase 4 — Reliability & observability (G-3.x)
+## Phase 4 — Reliability & observability (G-3.x) — ✅ DONE 2026-07-10
+
+> Branch `phase-4-observability` (commits f9b0e7c, b534052, a0854b9). Task 4.2's open
+> question answered: **Hobby target, Fluid Compute unconfirmed → SENDS_PER_RUN=1 default,
+> no in-function inter-send sleep** (the safe design, option b). Task 4.1 shipped the
+> CronRun model (30d TTL), `GET /api/cron-runs`, dashboard last-run strip + PINGER-STALE
+> detector, Manila-day-throttled email error digest, and review-page lastSendError. Task
+> 4.3 capped send-batch per request (SEND_BATCH_MAX=5) with client-side chunking/spacing.
+> Verified: 235 tests, tsc, build green. Remaining plan phases: 5 (maintainability), 6 (product).
 
 ### Task 4.1 — Failure surfacing (G-3.3)
 - Persist per-run summaries: new tiny `CronRun` model (startedAt, duration, summary

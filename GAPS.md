@@ -19,9 +19,9 @@ against code. No changes were made to source files.
 | 6 | ~~Bounce detection does not exist~~ **RESOLVED 2026-07-10** (Task 3.5: send-time classifier + mailer-daemon poll scan, env-gated) | Correctness / Docs drift |
 | 7 | ~~Delete orphans~~ **RESOLVED 2026-07-10** (Task 3.6: campaign delete 409-guards on contacts; contact delete cascades logs) | Data integrity |
 | 8 | ~~Zero tests~~ **RESOLVED 2026-07-10** (Task 2.1: vitest, 235 unit tests over the pure lib layer) | Quality |
-| 9 | No observability: cron errors are returned to a pinger nobody reads | Reliability |
-| 10 | Serverless send loop sleeps 30–60 s between sends; Vercel-plan timeout risk | Architecture |
-| 11 | `/api/send-batch` has no inter-send throttle (burst risk during warm-up) | Deliverability |
+| 9 | ~~No observability~~ **RESOLVED 2026-07-10** (Task 4.1: CronRun log w/ 30d TTL, dashboard last-run strip + PINGER STALE detector, email error digest throttled 1/Manila-day, review-page lastSendError) | Reliability |
+| 10 | ~~Serverless sleep / timeout risk~~ **RESOLVED 2026-07-10** (Task 4.2: Hobby confirmed as target; SENDS_PER_RUN=1 default, no in-function inter-send sleep) | Architecture |
+| 11 | ~~send-batch has no throttle~~ **RESOLVED 2026-07-10** (Task 4.3: SEND_BATCH_MAX=5 per-request cap + review UI chunks & spaces sends client-side) | Deliverability |
 | 12 | Regex injection / ReDoS in suppressions search (`$regex` from query string) | Security |
 | 13 | Mass-assignment style `Model.create(body)` on campaigns & suppressions | Security / Validation |
 | 14 | Unauthenticated public tracking + OAuth endpoints (DoS, score inflation, missing OAuth `state`) | Security |
@@ -405,12 +405,11 @@ urgent.
 
 ## Open Questions (not guessed at)
 
-1. **Vercel plan / max duration** — is the deploy target still Hobby, and does the
-   account have Fluid Compute (300 s) enabled? Determines whether the in-function sleep
-   pattern (3.1) is safe or must move to a queue/multi-invocation design.
-2. **Is public exposure intended at all?** If the deployment could sit behind Vercel
-   password protection / Cloudflare Access instead of app-level auth, gap #1's fix
-   changes shape (platform config vs. code).
+1. ~~Vercel plan / max duration~~ **ANSWERED 2026-07-10:** target is Hobby, Fluid Compute
+   not confirmed. Resolved by Task 4.2 (SENDS_PER_RUN=1, no in-function sleep) so the
+   in-function sleep pattern no longer exists — the question no longer gates anything.
+2. ~~Is public exposure intended at all?~~ **ANSWERED 2026-07-10:** app-level password auth
+   was chosen and shipped (Phase 1). Not relying on Vercel password protection.
 3. **Compose for replied contacts** (5.x) — intentional restriction or oversight?
 4. **`design reference/`, `graphify-out/`, `.planning/`** — keep in repo (gitignored) or
    are these transient?
