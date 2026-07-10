@@ -102,11 +102,15 @@ export default function ReviewPage() {
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   // ── Send batch state ──────────────────────────────────────────────────────────
+  // SEND_BATCH_MAX must match the server default in /api/send-batch/route.ts (envInt "SEND_BATCH_MAX", 5)
+  const SEND_BATCH_MAX = 5;
+
   const [checkedIds,   setCheckedIds]   = useState<Set<string>>(new Set());
   const [sending,      setSending]      = useState(false);
   const [sendResults,  setSendResults]  = useState<
     { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[]
   >([]);
+  const [sendProgress, setSendProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Current draft index
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -204,35 +208,70 @@ export default function ReviewPage() {
     if (checkedIds.size === 0) return;
     setSending(true);
     setSendResults([]);
+    setSendProgress(null);
     setGlobalError(null);
 
+    // Split selected ids into chunks of SEND_BATCH_MAX so each request stays
+    // within the server's per-request cap and Vercel's function time limit.
+    // A short randomised delay between chunks spreads sends over wall-clock time
+    // (warm-up deliverability), without keeping a long-running server function open.
+    const allIds = Array.from(checkedIds);
+    const chunks: string[][] = [];
+    for (let i = 0; i < allIds.length; i += SEND_BATCH_MAX) {
+      chunks.push(allIds.slice(i, i + SEND_BATCH_MAX));
+    }
+
+    // Inline delay helper — must NOT import from src/lib/gmail.ts (server dep)
+    const clientDelay = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    const accumulated: typeof sendResults = [];
+    let capHit = false;
+
     try {
-      const res = await fetch("/api/send-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(checkedIds) }),
-      });
+      for (let ci = 0; ci < chunks.length; ci++) {
+        setSendProgress({ done: ci, total: chunks.length });
 
-      if (res.status === 429) {
-        const data = await res.json().catch(() => ({}));
-        setGlobalError(`Daily send cap reached (${(data as { cap?: number }).cap ?? 15}/day).`);
-        return;
+        const res = await fetch("/api/send-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: chunks[ci] }),
+        });
+
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          setGlobalError(
+            `Daily send cap reached (${(data as { cap?: number }).cap ?? 15}/day). ${accumulated.length > 0 ? "Earlier sends completed — see results below." : "No emails were sent."}`
+          );
+          capHit = true;
+          break;
+        }
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          // Surface the error but keep accumulated results from earlier chunks
+          setGlobalError((data as { error?: string }).error ?? `HTTP ${res.status}`);
+          break;
+        }
+
+        const data = (await res.json()) as {
+          results: { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[];
+        };
+        accumulated.push(...data.results);
+        // Update results panel incrementally so user sees progress
+        setSendResults([...accumulated]);
+
+        // Short randomised inter-chunk delay (1500–4000 ms) — skip after last chunk
+        if (ci < chunks.length - 1 && !capHit) {
+          const delay = 1500 + Math.floor(Math.random() * 2500);
+          await clientDelay(delay);
+        }
       }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setGlobalError((data as { error?: string }).error ?? `HTTP ${res.status}`);
-        return;
-      }
-
-      const data = await res.json() as {
-        results: { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[];
-      };
-      setSendResults(data.results);
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
+      setSendProgress(null);
       await loadAll();
     }
   }
@@ -952,7 +991,7 @@ export default function ReviewPage() {
                 })}
               </Panel>
 
-              {/* Send button */}
+              {/* Send button + progress */}
               {checkedIds.size > 0 && (
                 <div style={{ marginTop: 14 }}>
                   <Button
@@ -961,10 +1000,27 @@ export default function ReviewPage() {
                     disabled={sending}
                     onClick={handleSendBatch}
                   >
-                    {sending
+                    {sending && sendProgress
+                      ? `Sending… batch ${sendProgress.done + 1}/${sendProgress.total}`
+                      : sending
                       ? "Sending…"
                       : `Send ${checkedIds.size} email${checkedIds.size === 1 ? "" : "s"}`}
                   </Button>
+                  {sending && sendProgress && sendProgress.total > 1 && (
+                    <div style={{ marginTop: 8, textAlign: "center" }}>
+                      <span
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 10.5,
+                          color: FAINT,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.1em",
+                        }}
+                      >
+                        {sendProgress.done} OF {sendProgress.total} BATCHES SENT · SPACING NEXT
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </>

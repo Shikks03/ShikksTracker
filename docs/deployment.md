@@ -50,6 +50,7 @@ End-to-end checklist for going live. Work through the steps in order — each se
    | `SENDS_PER_RUN` | `1` | Max sends per cron invocation. Default is 1 for Vercel Hobby safety (no inter-send sleep in the cron path; the hourly pinger spreads throughput). Raise only on a Vercel plan that guarantees function durations longer than 60 s. |
    | `DRAFTS_PER_RUN` | `10` | Max drafts generated per cron invocation |
    | `HOT_LEAD_THRESHOLD` | `5` | Engagement score at which a contact is flagged as a hot lead |
+   | `SEND_BATCH_MAX` | `5` | Max approved logs per `/api/send-batch` request. The review UI chunks larger selections automatically and spaces them 1.5–4 s apart client-side. Keep at 5 on Vercel Hobby to stay well within the 60 s function limit. |
 
 5. Click **Deploy**.
 6. **Note:** Vercel applies environment variable changes only after a redeploy. If you add or update a variable later, trigger a redeploy from the Vercel dashboard (Deployments → Redeploy).

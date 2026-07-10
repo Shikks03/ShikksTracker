@@ -13,7 +13,8 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-const DAILY_SEND_CAP = envInt("DAILY_SEND_CAP", 15);
+const DAILY_SEND_CAP  = envInt("DAILY_SEND_CAP",  15);
+const SEND_BATCH_MAX  = envInt("SEND_BATCH_MAX",   5);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -24,6 +25,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!Array.isArray(ids) || ids.length === 0) {
       return NextResponse.json(
         { error: "ids must be a non-empty array" },
+        { status: 400 }
+      );
+    }
+
+    if (ids.length > SEND_BATCH_MAX) {
+      return NextResponse.json(
+        { error: `Batch too large: max ${SEND_BATCH_MAX} per request`, max: SEND_BATCH_MAX },
         { status: 400 }
       );
     }
