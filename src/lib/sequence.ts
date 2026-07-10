@@ -17,8 +17,6 @@ import { extractAndRewriteLinks, renderTrackedHtml } from "@/lib/tracking";
 import {
   sendGmailMessage,
   getGmailClient,
-  sleep,
-  randomDelayMs,
 } from "@/lib/gmail";
 import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
@@ -41,14 +39,24 @@ function envInt(name: string, fallback: number): number {
 }
 
 const DAILY_SEND_CAP = envInt("DAILY_SEND_CAP", 15);
-const SENDS_PER_RUN = envInt("SENDS_PER_RUN", 3);
+/**
+ * Max sends per cron invocation. Default is 1 for Vercel Hobby safety: with no
+ * inter-send sleep in the cron path, the function completes well within the
+ * Hobby 60 s limit even if it is enforced. The hourly pinger (8–18h Manila,
+ * 10 runs/day) spreads throughput; the 15/day cap remains reachable across
+ * window hours plus manual send-batch. Raise this only on a plan that guarantees
+ * longer function durations (e.g. Vercel Pro with maxDuration > 60 s).
+ */
+const SENDS_PER_RUN = envInt("SENDS_PER_RUN", 1);
 const DRAFTS_PER_RUN = envInt("DRAFTS_PER_RUN", 10);
-const SEND_DELAY_MIN_MS = envInt("SEND_DELAY_MIN_MS", 30_000);
-const SEND_DELAY_MAX_MS = envInt("SEND_DELAY_MAX_MS", 60_000);
 const SEND_WINDOW_START_HOUR = 8;
 const SEND_WINDOW_END_HOUR = 18;
 const SEND_WINDOW_TIMEZONE = "Asia/Manila";
-/** Stop starting new sends when elapsed run time exceeds this (Vercel function limit safety). */
+/**
+ * Stop starting new sends when elapsed run time exceeds this (Vercel function limit safety).
+ * With SENDS_PER_RUN=1 and no inter-send sleep, a single-send run typically completes in
+ * a few seconds, so this budget is a belt-and-suspenders guard for unusually slow sends.
+ */
 const RUN_TIME_BUDGET_MS = 240_000;
 
 // ---------------------------------------------------------------------------
@@ -62,8 +70,8 @@ const RUN_TIME_BUDGET_MS = 240_000;
  * a human can re-approve after verifying in the Gmail Sent folder.
  *
  * 10 minutes is intentionally conservative: a normal send + post-send DB writes
- * completes in a few seconds; the 30–90 s inter-send sleep happens AFTER the
- * log is already marked "sent", so it cannot inflate this window.
+ * completes in a few seconds, so there is a large safety margin before a log
+ * is treated as stale and reverted to "draft" for human review.
  */
 const STALE_SENDING_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -737,10 +745,6 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
       result.skipped.push(`log ${String(log._id)}: ${logResult.error ?? "skipped"}`);
     } else {
       result.errors.push(`log ${String(log._id)}: ${logResult.error ?? "failed"}`);
-    }
-
-    if (i < approvedLogs.length - 1) {
-      await sleep(randomDelayMs(SEND_DELAY_MIN_MS, SEND_DELAY_MAX_MS));
     }
   }
 

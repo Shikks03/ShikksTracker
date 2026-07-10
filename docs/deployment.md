@@ -47,10 +47,8 @@ End-to-end checklist for going live. Work through the steps in order — each se
    |---|---|---|
    | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Claude model for draft generation |
    | `DAILY_SEND_CAP` | `15` | Hard ceiling on emails sent per Manila calendar day |
-   | `SENDS_PER_RUN` | `3` | Max sends per cron invocation |
+   | `SENDS_PER_RUN` | `1` | Max sends per cron invocation. Default is 1 for Vercel Hobby safety (no inter-send sleep in the cron path; the hourly pinger spreads throughput). Raise only on a Vercel plan that guarantees function durations longer than 60 s. |
    | `DRAFTS_PER_RUN` | `10` | Max drafts generated per cron invocation |
-   | `SEND_DELAY_MIN_MS` | `30000` | Min delay between sends in a single run (ms) |
-   | `SEND_DELAY_MAX_MS` | `60000` | Max delay between sends in a single run (ms) |
    | `HOT_LEAD_THRESHOLD` | `5` | Engagement score at which a contact is flagged as a hot lead |
 
 5. Click **Deploy**.

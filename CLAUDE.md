@@ -49,7 +49,7 @@ The sequence engine is split into two steps instead of generate-and-send in one 
 - **Reply detection:** poll `users.threads.get` for active contacts with a `gmailThreadId`. A bounce pre-pass runs first (mailer-daemon/postmaster message naming the contact → suppress + `"bounced"` + alert, no reply/score). On reply: `status: "replied"`, `pipelineStage: "replied"`, clear `nextSendAt`, `+10` score, fire the takeover alert. Opt-out replies (intent-anchored match, NOT bare "stop" — see `replies.ts` asymmetry rationale) → `status: "unsubscribed"` + Suppression entry + **its own takeover alert** (so misfires are auditable). From-header matching is exact-address equality via `extractFromAddress`, not substring. **Note:** the takeover alert queue itself was built 2026-07-10 (Task 3.2) — it did not exist before, despite earlier docs claiming it did.
 - **Takeover alert** (email-to-self) fires **last** in the reply-detection step so a failure elsewhere never skips it.
 - **Threading:** build raw MIME with `In-Reply-To` / `References` headers so follow-ups stay in the original Gmail thread.
-- **Throttling:** random 30–90 s delay between sends in a batch; hard cap 15 sends/day; send only 8am–6pm Asia/Manila. Excess due sends defer to the next run.
+- **Throttling (cron):** no inter-send sleep in the cron path (Task 4.2 — Hobby-safe); hard cap 15 sends/day; send only 8am–6pm Asia/Manila; `SENDS_PER_RUN=1` default (1 send per hourly cron run). Manual send-batch has no inter-send throttle (Task 4.3). Excess due sends defer to the next run.
 - **Tracking:** 1×1 pixel at `/api/track/open/{trackingPixelId}` (returns transparent PNG); links rewritten to `/api/track/click/{trackingId}` (302 to original). Opens are a weak signal (proxying/privacy protection); clicks and replies matter more.
 - **Scoring:** additive on Contact — `+1` open, `+3` click, `+10` reply. Recalculate/bump on each event. Hot leads filter: `score >= 5`.
 - **Pipeline transitions:** `not_started → contacted` (auto, first send) and `contacted → replied` (auto, reply detection); `call_booked` / `proposal_sent` / `won` / `lost` are manual from the dashboard.
@@ -76,8 +76,9 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
 # Optional tuning (defaults): ANTHROPIC_MODEL=claude-sonnet-4-6, DAILY_SEND_CAP=15,
-# SENDS_PER_RUN=3, DRAFTS_PER_RUN=10, SEND_DELAY_MIN_MS=30000, SEND_DELAY_MAX_MS=60000,
-# HOT_LEAD_THRESHOLD=5, BOUNCE_POLL_DETECTION=true (set "false" to disable the
+# SENDS_PER_RUN=1 (default 1 for Hobby safety — raise only on Pro/longer-duration plan),
+# DRAFTS_PER_RUN=10, HOT_LEAD_THRESHOLD=5,
+# BOUNCE_POLL_DETECTION=true (set "false" to disable the
 # mailer-daemon poll-time bounce scan; send-time bounce classification always runs)
 ```
 
@@ -172,7 +173,8 @@ External pinger → `GET/POST /api/cron/sequence` (x-cron-secret) → `runSequen
    suppressed (unsubscribe + clear); else Claude drafts stage `currentStage+1` as
    `status:"draft"` (idempotent per contact+stage, incl. `"sending"`; cap DRAFTS_PER_RUN).
 3. **sendApproved** — inside 8–18h Manila window, under 15/day Manila-day cap, max
-   SENDS_PER_RUN, 30–60 s sleep between sends, 240 s run budget → `sendOneLog` per log.
+   SENDS_PER_RUN (default 1), no inter-send sleep (Hobby-safe), 240 s run budget →
+   `sendOneLog` per log.
 
 `sendOneLog` (also used by `/api/send-batch`): **atomically claim `approved → "sending"`**
 (skip if not claimed — no double-send) → load contact+campaign (revert to `"draft"` if
@@ -229,9 +231,10 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
   requires `DASHBOARD_PASSWORD` in `.env.local` too.** Task 1.3 hardening also landed
   (regex escape, campaign/suppression input validation, timing-safe cron compare,
   health 503 redaction, OAuth bootstrap 404 outside dev unless `ALLOW_OAUTH_BOOTSTRAP`).
-- **`maxDuration = 300`** on cron routes assumes the Vercel plan honors it; CLAUDE.md
-  says Hobby — unresolved contradiction (GAPS open question Q1/Q5). The engine sleeps
-  30–60 s between sends *inside* the function.
+- **`maxDuration = 300`** on cron routes is a harmless ceiling request. Deploy target
+  is Hobby, which may cap it to 60 s — that is now fine (Task 4.2 resolved Q1/Q5):
+  `SENDS_PER_RUN=1` default with no inter-send sleep in the cron path keeps a single
+  run well within 60 s.
 - `/api/send-batch` enforces the daily cap but **intentionally not** the send window
   (user-initiated sends are allowed anytime); it currently has no inter-send throttle.
 - The Review Gate statement above ("drafts require approval") is now partially
