@@ -120,4 +120,24 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   until then — this is the fail-closed design, not a bug), then walk the CLAUDE.md
   secrets checklist at deploy time. GAPS #1 marked resolved; Phases 2+ of the plan
   (tests, correctness/compliance) remain.
+- **2026-07-11** — **Remediation Phase 5 (maintainability) implemented** on branch
+  `remediation-phase-5` (3 commits, Opus direct — the changes are mechanical dedup + docs
+  where the 221-test harness + tsc + build are the regression net; visual QA still blocked
+  on credentials). **Task 5.2:** `EmailLog` gains `createdAt` (`timestamps:{createdAt:true,
+  updatedAt:false}`). **Task 5.4:** deleted `bodyToHtml` from draft.ts (duplicated
+  `renderTrackedHtml`); the generate-draft test endpoint now calls
+  `renderTrackedHtml(body,[],null)` for identical untracked HTML; folded the unique
+  edge-case assertions into tracking.test.ts and removed draft.test.ts (235→221 tests,
+  net of the 18 removed bodyToHtml tests + 4 added). **Task 5.1:** three shared modules —
+  `src/components/tokens.ts` (fonts+palette, was per-page with FOREST drift, now
+  `FOREST_ACTION` #1C4B3A vs `FOREST_WON` #1C6E3A), `src/lib/client.ts` (`apiFetch<T>` +
+  `HOT_THRESHOLD` reading `NEXT_PUBLIC_HOT_LEAD_THRESHOLD`), `src/lib/env.ts` (`envInt`) —
+  all pages/routes migrated; previously-swallowed `.catch(()=>{})` fetches now surface
+  errors (dashboard configError strip, compose/import campaign-load errors,
+  `handleApproveAllSafe` reports "approved N of M — K failed"). **Task 5.3:** README
+  (/review "regenerate"→"edit/discard", added /compose), pixel route now does the atomic
+  `{_id, firstOpenedAt:null}` first-open write its comment already claimed, CLAUDE.md
+  gotchas/map reconciled; deployment.md §6.4/§7 were already accurate from the 2-3 sync.
+  Verified: tsc, 221 tests, production build all green. **Remaining plan phase: 6
+  (product improvements — independent, post-go-live OK).**
 - **2026-07-06 → 07-07** — **Manual compose + UI send** built to unblock sending without the Anthropic key (specs/plans in docs/superpowers/, dated 2026-07-06 & 07-07). Subagent-driven-development workflow (Sonnet implementers, spec+quality review per task); merged to `main` fast-forward, verified tsc + `npm run build` (30 routes). Two feature sets: **(A) single manual send** — `sendOneLog` extracted from `src/lib/sequence.ts` (shared by cron + manual); `POST /api/email-logs` creates an `approved` log (supersedes "no POST by design"); `POST /api/send-batch` sends caller-specified approved logs (daily cap enforced, send-window intentionally NOT); Review Queue approved strip gained checkboxes + "Send N emails" button; sidebar `06 · Compose`. **(B) multi-contact compose** — `src/lib/compose.ts` `applyPlaceholders` ({{businessName}}/{{contactName}}, name fallback "there"); `POST /api/email-logs/batch` (per-contact auto stage = currentStage+1, skips duplicates/inactive/completed with reasons, returns {created, skipped[]}); `/compose` rewritten to a campaign-filtered recipient checklist (select-all, token hint, queued/skipped summary, no auto-redirect). Cron endpoint untouched — still works if AI key + pinger added later, but the pinger is now optional. Runtime/visual QA against live DB still pending user's credential setup. Note: pre-existing uncommitted working-tree edits to next.config.ts + src/components/ui.tsx remain unstaged (not part of this work).

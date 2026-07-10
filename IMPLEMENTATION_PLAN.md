@@ -273,7 +273,14 @@ committed, no client-side env exposure. Remaining work splits cleanly:
   request (e.g. 3) and have the review UI chunk requests client-side with a progress
   indicator (UI already tracks per-log results).
 
-## Phase 5 — Maintainability (G-4.x)
+## Phase 5 — Maintainability (G-4.x) — ✅ DONE 2026-07-11 (branch `remediation-phase-5`)
+
+> All four tasks landed (Opus direct — mechanical dedup + docs, guarded by tsc + 221
+> tests + build). 5.1: shared `tokens.ts`/`client.ts`/`env.ts`, FOREST split into
+> FOREST_ACTION/FOREST_WON, NEXT_PUBLIC_HOT_LEAD_THRESHOLD, swallowed fetch errors now
+> surfaced. 5.2: EmailLog `createdAt`. 5.3: README + CLAUDE.md truth pass, atomic pixel
+> first-open write (deployment.md §6.4/§7 were already accurate). 5.4: `bodyToHtml`
+> deleted, callers use `renderTrackedHtml(body,[],null)`. Remaining: Phase 6 (product).
 
 ### Task 5.1 — Shared frontend API client + tokens (G-4.2)
 - New `src/lib/client.ts` (client-safe): the `apiFetch<T>` helper (move from
