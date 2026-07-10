@@ -1,6 +1,9 @@
 export { default as Campaign } from "./Campaign";
 export type { ICampaign } from "./Campaign";
 
+export { default as CronRun } from "./CronRun";
+export type { ICronRun } from "./CronRun";
+
 export { default as Contact } from "./Contact";
 export type { IContact } from "./Contact";
 

@@ -34,11 +34,28 @@ const HOT_BG     = "#F6ECCE";
 
 const HOT_THRESHOLD = 5;
 
+// Send window hours (Manila) — must match sequence.ts
+const SEND_WINDOW_START = 8;
+const SEND_WINDOW_END   = 18;
+/** Pinger is considered stale when the last run is older than this (ms). */
+const STALE_PINGER_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Campaign {
   _id: string;
   name: string;
+}
+
+interface CronRunDoc {
+  _id: string;
+  startedAt: string;
+  durationMs: number;
+  errorCount: number;
+  summary: {
+    sent: number;
+    errors: string[];
+  };
 }
 
 interface ContactRow {
@@ -92,6 +109,25 @@ function getManilaGreeting(): string {
   if (manilaHour < 12) return "umaga";
   if (manilaHour < 18) return "hapon";
   return "gabi";
+}
+
+function getManilaHour(): number {
+  return (new Date().getUTCHours() + 8) % 24;
+}
+
+function isWithinSendWindow(): boolean {
+  const h = getManilaHour();
+  return h >= SEND_WINDOW_START && h < SEND_WINDOW_END;
+}
+
+function timeAgoShort(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins < 60)  return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
 }
 
 function getKickerDate(): string {
@@ -279,6 +315,7 @@ export default function Dashboard() {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [draftCount,    setDraftCount]    = useState(0);
+  const [lastCronRun,   setLastCronRun]   = useState<CronRunDoc | null | "none">(null); // null=loading, "none"=no runs yet
 
   // Filter state
   const [search,        setSearch]        = useState("");
@@ -288,7 +325,7 @@ export default function Dashboard() {
   const [hotOnly,       setHotOnly]       = useState(false);
   const [sortByScore,   setSortByScore]   = useState(true);
 
-  // One-time: campaigns + draft count
+  // One-time: campaigns + draft count + last cron run
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
@@ -303,6 +340,17 @@ export default function Dashboard() {
         if (Array.isArray(d)) setDraftCount(d.length);
       })
       .catch(() => {});
+
+    fetch("/api/cron-runs?limit=1")
+      .then((r) => r.json())
+      .then((d: unknown) => {
+        if (Array.isArray(d) && d.length > 0) {
+          setLastCronRun(d[0] as CronRunDoc);
+        } else {
+          setLastCronRun("none");
+        }
+      })
+      .catch(() => setLastCronRun("none"));
   }, []);
 
   // Contacts — re-fetched on filter change
@@ -567,7 +615,132 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* ── 3. FILTER ROW ── */}
+      {/* ── 3. ENGINE RUN STRIP ── */}
+      {lastCronRun !== null && (() => {
+        const inWindow = isWithinSendWindow();
+
+        if (lastCronRun === "none") {
+          return (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "10px 16px",
+                backgroundColor: "#F4F0E6",
+                border: "1px solid #D3C9B4",
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 10.5,
+                  color: FAINT,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                NO ENGINE RUNS RECORDED YET
+              </span>
+            </div>
+          );
+        }
+
+        const run = lastCronRun;
+        const runAgeMs = Date.now() - new Date(run.startedAt).getTime();
+        const isStale = inWindow && runAgeMs > STALE_PINGER_THRESHOLD_MS;
+        const hasErrors = run.errorCount > 0;
+
+        const stripBg   = isStale ? "#FEF5E4" : hasErrors ? "#FEF0EA" : "#F4F0E6";
+        const stripBorderLeft = isStale ? `3px solid ${AMBER}` : hasErrors ? `3px solid ${CLAY}` : "1px solid #D3C9B4";
+
+        return (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "10px 16px",
+              backgroundColor: stripBg,
+              border: "1px solid #D3C9B4",
+              borderLeft: stripBorderLeft,
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                color: FAINT,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              LAST ENGINE RUN
+            </span>
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                color: INK,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {timeAgoShort(run.startedAt)}
+            </span>
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                color: FAINT,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {run.summary.sent} SENT
+            </span>
+            {hasErrors && (
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 10.5,
+                  color: CLAY,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {run.errorCount} ERROR{run.errorCount !== 1 ? "S" : ""}
+              </span>
+            )}
+            {isStale && (
+              <span
+                style={{
+                  fontFamily: mono,
+                  fontSize: 10.5,
+                  color: AMBER_TEXT,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                — PINGER STALE
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── 4. FILTER ROW ── */}
       <div
         style={{
           display: "flex",
@@ -686,7 +859,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* ── 4. CONTACT GROUPS ── */}
+      {/* ── 5. CONTACT GROUPS ── */}
       <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 36 }}>
 
         {/* Loading state */}

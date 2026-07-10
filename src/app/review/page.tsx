@@ -36,6 +36,9 @@ interface EmailLogItem {
   status: "draft" | "approved" | "sent";
   subject: string;
   body: string;
+  /** Set when a send attempt failed; cleared on successful send. Present on approved logs that reverted after a Gmail error. */
+  lastSendError?: string | null;
+  sendErrorCount?: number;
 }
 
 interface ContactDoc {
@@ -896,27 +899,52 @@ export default function ReviewPage() {
                           style={{ marginRight: 14, cursor: "pointer", flexShrink: 0, width: 15, height: 15, accentColor: FOREST }}
                         />
 
-                        <span
+                        <div
                           style={{
-                            fontFamily: mono,
-                            fontSize: 11,
-                            color: "#5A5344",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.06em",
                             flex: 1,
                             minWidth: 0,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
                             marginRight: 16,
                           }}
                         >
-                          {(contact?.businessName ?? "—").toUpperCase()}
-                          {" · "}
-                          {ordinalStage(log.stage)} TOUCH
-                          {" · "}
-                          <span style={{ color: FAINT2 }}>{log.subject}</span>
-                        </span>
+                          <span
+                            style={{
+                              fontFamily: mono,
+                              fontSize: 11,
+                              color: "#5A5344",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.06em",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              display: "block",
+                            }}
+                          >
+                            {(contact?.businessName ?? "—").toUpperCase()}
+                            {" · "}
+                            {ordinalStage(log.stage)} TOUCH
+                            {" · "}
+                            <span style={{ color: FAINT2 }}>{log.subject}</span>
+                          </span>
+                          {log.lastSendError && (
+                            <span
+                              style={{
+                                fontFamily: mono,
+                                fontSize: 10,
+                                color: CLAY,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.05em",
+                                display: "block",
+                                marginTop: 3,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={log.lastSendError}
+                            >
+                              SEND ERR ({log.sendErrorCount ?? 1}×) — {log.lastSendError}
+                            </span>
+                          )}
+                        </div>
                         <UnapproveButton onUnapprove={() => handleUnapprove(log._id)} />
                       </div>
                     </div>

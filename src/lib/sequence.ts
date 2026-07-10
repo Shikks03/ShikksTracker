@@ -11,12 +11,14 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import Campaign from "@/models/Campaign";
 import EmailLog from "@/models/EmailLog";
+import CronRun from "@/models/CronRun";
 import Suppression from "@/models/Suppression";
 import { generateEmailDraft } from "@/lib/draft";
-import { extractAndRewriteLinks, renderTrackedHtml } from "@/lib/tracking";
+import { extractAndRewriteLinks, renderTrackedHtml, htmlEscape } from "@/lib/tracking";
 import {
   sendGmailMessage,
   getGmailClient,
+  getSenderAddress,
 } from "@/lib/gmail";
 import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
@@ -803,6 +805,7 @@ async function sweepStaleSendingLogs(): Promise<StaleSweepResult> {
 
 export async function runSequenceEngine(): Promise<RunSummary> {
   const runStartMs = Date.now();
+  const startedAt = new Date(runStartMs);
 
   await connectDB();
 
@@ -819,7 +822,7 @@ export async function runSequenceEngine(): Promise<RunSummary> {
   // C: Send approved
   const sendsResult = await sendApproved(runStartMs);
 
-  return {
+  const summary: RunSummary = {
     staleSendingReverted: sweepResult.reverted,
     repliesChecked: repliesResult.checked,
     replied: repliesResult.replied,
@@ -830,4 +833,129 @@ export async function runSequenceEngine(): Promise<RunSummary> {
     skipped: sendsResult.skipped,
     errors: [...repliesResult.errors, ...draftsResult.errors, ...sendsResult.errors],
   };
+
+  // Derive errorCount: count entries in the combined errors array only.
+  // Normal outcomes (skipped, replied, unsubscribed, bounced, staleSendingReverted)
+  // are not errors — they are expected operational states.
+  const errorCount = summary.errors.length;
+
+  const durationMs = Date.now() - runStartMs;
+
+  // Persist the CronRun doc — must not throw out of the engine.
+  let cronRunId: string | null = null;
+  try {
+    const cronRun = await CronRun.create({
+      startedAt,
+      durationMs,
+      summary,
+      errorCount,
+      digestSentAt: null,
+    });
+    cronRunId = String(cronRun._id);
+  } catch (persistErr) {
+    console.error("[sequence] CronRun persist failed:", persistErr);
+    // Logging failure must not crash the engine — return summary as-is.
+    return summary;
+  }
+
+  // Error digest: send an email-to-self if there were errors OR any EmailLog
+  // has been stuck with sendErrorCount >= 3. Throttle: one per Manila calendar day.
+  try {
+    // Count stuck logs (sendErrorCount >= 3 + still approved, i.e. still retrying)
+    const stuckCount = await EmailLog.countDocuments({
+      status: "approved",
+      sendErrorCount: { $gte: 3 },
+    });
+
+    const shouldDigest = errorCount > 0 || stuckCount > 0;
+
+    if (shouldDigest) {
+      // Check whether any prior run in the same Manila day already sent a digest
+      const dayStart = getManilaDayStart(new Date());
+      const alreadySent = await CronRun.findOne({
+        startedAt: { $gte: dayStart },
+        digestSentAt: { $ne: null },
+        // Exclude the current run itself (it has digestSentAt: null and we haven't set it yet)
+        _id: { $ne: cronRunId },
+      }).lean();
+
+      if (!alreadySent) {
+        // Build digest email
+        const gmail = getGmailClient();
+        let selfAddress: string | null = null;
+        try {
+          selfAddress = await getSenderAddress(gmail);
+        } catch (addrErr) {
+          console.warn("[sequence] digest: could not resolve sender address:", addrErr);
+        }
+
+        if (selfAddress) {
+          // Fetch up to 3 example error messages
+          const exampleErrors = summary.errors.slice(0, 3);
+
+          // Fetch stuck log contact names (up to 5) for context
+          let stuckNames = "";
+          if (stuckCount > 0) {
+            const stuckLogs = await EmailLog.find({
+              status: "approved",
+              sendErrorCount: { $gte: 3 },
+            })
+              .select({ contactId: 1 })
+              .limit(5)
+              .lean();
+            const contactIds = stuckLogs.map((l) => l.contactId);
+            const stuckContacts = await Contact.find({ _id: { $in: contactIds } })
+              .select({ businessName: 1 })
+              .lean();
+            const names = stuckContacts.map((c) => htmlEscape(c.businessName)).join(", ");
+            stuckNames = stuckCount > 5
+              ? `${names} and ${stuckCount - 5} more`
+              : names;
+          }
+
+          const runTimeStr = `${Math.round(durationMs / 1000)}s`;
+          const errorListHtml = exampleErrors.length > 0
+            ? `<ul>${exampleErrors.map((e) => `<li>${htmlEscape(e)}</li>`).join("")}</ul>`
+            : "";
+          const moreErrors = summary.errors.length > 3
+            ? `<p>…and ${summary.errors.length - 3} more error(s) in this run.</p>`
+            : "";
+          const stuckHtml = stuckCount > 0
+            ? `<p><strong>Stuck approved logs (sendErrorCount ≥ 3):</strong> ${stuckCount} — ${stuckNames}.<br>These logs have failed 3+ send attempts and are still queued. Investigate or manually discard them from the review page.</p>`
+            : "";
+          const baseUrl = process.env.APP_BASE_URL;
+          const reviewLink = baseUrl
+            ? `<p><a href="${htmlEscape(baseUrl)}/review">Open review page</a></p>`
+            : "";
+
+          const htmlBody = `
+            <h2>Sequence engine error digest</h2>
+            <p><strong>Run time:</strong> ${htmlEscape(runTimeStr)} &nbsp;|&nbsp;
+               <strong>Errors this run:</strong> ${errorCount} &nbsp;|&nbsp;
+               <strong>Sent:</strong> ${summary.sent}</p>
+            ${errorListHtml}${moreErrors}${stuckHtml}${reviewLink}
+          `.trim();
+
+          try {
+            await sendGmailMessage({
+              to: selfAddress,
+              subject: `[ShikksTracker] Engine errors — ${errorCount} error(s), ${stuckCount} stuck log(s)`,
+              htmlBody,
+            });
+
+            // Mark digestSentAt on the current CronRun doc
+            await CronRun.findByIdAndUpdate(cronRunId, { digestSentAt: new Date() });
+          } catch (sendErr) {
+            console.warn("[sequence] digest: send failed:", sendErr);
+            // Digest send failure must not crash the engine.
+          }
+        }
+      }
+    }
+  } catch (digestErr) {
+    console.error("[sequence] digest check failed:", digestErr);
+    // Digest machinery failure must not crash the engine.
+  }
+
+  return summary;
 }
