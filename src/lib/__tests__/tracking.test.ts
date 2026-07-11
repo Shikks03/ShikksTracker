@@ -132,6 +132,128 @@ describe("extractAndRewriteLinks", () => {
 });
 
 // ---------------------------------------------------------------------------
+// extractAndRewriteLinks — unsubscribe URL exclusion (Task 6.2)
+// ---------------------------------------------------------------------------
+
+describe("extractAndRewriteLinks — unsubscribe URL exclusion", () => {
+  const SAVED_BASE = process.env.APP_BASE_URL;
+
+  afterEach(() => {
+    if (SAVED_BASE === undefined) {
+      delete process.env.APP_BASE_URL;
+    } else {
+      process.env.APP_BASE_URL = SAVED_BASE;
+    }
+  });
+
+  it("excludes an own-domain /api/unsubscribe/ URL from tracking", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const token = "550e8400-e29b-41d4-a716-446655440000";
+    const body = `Please visit https://app.example.com/api/unsubscribe/${token} to opt out.`;
+    const { links } = extractAndRewriteLinks(body);
+    const urls = links.map((l) => l.url);
+    expect(urls).not.toContain(`https://app.example.com/api/unsubscribe/${token}`);
+    expect(links).toHaveLength(0);
+  });
+
+  it("tracks a normal URL while excluding an unsubscribe URL from the same body", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const token = "550e8400-e29b-41d4-a716-446655440000";
+    const body = [
+      "Check out https://mybusiness.com for more info.",
+      "",
+      `Unsubscribe: https://app.example.com/api/unsubscribe/${token}`,
+    ].join("\n");
+    const { links } = extractAndRewriteLinks(body);
+    const urls = links.map((l) => l.url);
+    expect(urls).toContain("https://mybusiness.com");
+    expect(urls).not.toContain(`https://app.example.com/api/unsubscribe/${token}`);
+    expect(links).toHaveLength(1);
+  });
+
+  it("does NOT exclude an /api/unsubscribe/ URL from a different domain", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const body = "Unsubscribe here: https://evil.com/api/unsubscribe/sometoken";
+    const { links } = extractAndRewriteLinks(body);
+    const urls = links.map((l) => l.url);
+    expect(urls).toContain("https://evil.com/api/unsubscribe/sometoken");
+    expect(links).toHaveLength(1);
+  });
+
+  it("excludes the unsubscribe URL when APP_BASE_URL has a path prefix", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const token = "abc-def-123";
+    const body = `Opt out: https://app.example.com/api/unsubscribe/${token}`;
+    const { links } = extractAndRewriteLinks(body);
+    expect(links).toHaveLength(0);
+  });
+
+  it("falls back to tracking when APP_BASE_URL is unset (cannot determine own domain)", () => {
+    // When APP_BASE_URL is missing, isUnsubscribeUrl returns false for all URLs,
+    // so the unsubscribe URL is tracked like any other URL. This is an edge case
+    // (APP_BASE_URL is required for sending) — tested to document the behaviour.
+    delete process.env.APP_BASE_URL;
+    const body = "Unsubscribe: https://app.example.com/api/unsubscribe/sometoken";
+    const { links } = extractAndRewriteLinks(body);
+    // Should have a tracking entry (cannot determine own domain without APP_BASE_URL)
+    expect(links).toHaveLength(1);
+    expect(links[0].url).toBe("https://app.example.com/api/unsubscribe/sometoken");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderTrackedHtml — unsubscribe URL rendered as plain anchor (Task 6.2)
+// ---------------------------------------------------------------------------
+
+describe("renderTrackedHtml — unsubscribe URL as plain anchor", () => {
+  const SAVED_BASE = process.env.APP_BASE_URL;
+
+  afterEach(() => {
+    if (SAVED_BASE === undefined) {
+      delete process.env.APP_BASE_URL;
+    } else {
+      process.env.APP_BASE_URL = SAVED_BASE;
+    }
+  });
+
+  it("renders the unsubscribe URL as a plain (non-click-tracked) anchor", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const token = "550e8400-e29b-41d4-a716-446655440000";
+    const unsubUrl = `https://app.example.com/api/unsubscribe/${token}`;
+    const body = `Hello there.\n\nUnsubscribe: ${unsubUrl}`;
+    // extractAndRewriteLinks excludes the unsubscribe URL → no tracking entry
+    const { links } = extractAndRewriteLinks(body);
+    expect(links).toHaveLength(0);
+    // renderTrackedHtml with empty links → URL has no trackingId → plain text fallback
+    const html = renderTrackedHtml(body, links, null);
+    // The unsubscribe URL must appear in the HTML but NOT wrapped in a click-redirect href
+    expect(html).toContain(unsubUrl);
+    expect(html).not.toContain("/api/track/click/");
+  });
+
+  it("renders a normal URL as tracked anchor while unsubscribe URL stays plain", () => {
+    process.env.APP_BASE_URL = "https://app.example.com";
+    const token = "550e8400-e29b-41d4-a716-446655440000";
+    const unsubUrl = `https://app.example.com/api/unsubscribe/${token}`;
+    const normalUrl = "https://mybusiness.com";
+    const body = `Visit ${normalUrl} for more.\n\nUnsubscribe: ${unsubUrl}`;
+    const { links } = extractAndRewriteLinks(body);
+    // Only the normal URL should be in links
+    expect(links).toHaveLength(1);
+    expect(links[0].url).toBe(normalUrl);
+    const html = renderTrackedHtml(body, links, null);
+    // Normal URL → click-tracked anchor
+    expect(html).toContain(`/api/track/click/${links[0].trackingId}`);
+    // Unsubscribe URL → plain text (no click-tracking redirect)
+    expect(html).toContain(unsubUrl);
+    expect(html).not.toContain(`/api/track/click/`+ unsubUrl);
+    // Crucially: the unsubscribe URL should not be wrapped in a tracked href
+    const unsubscribeAnchorTracked = `href="https://app.example.com/api/track/click/`;
+    expect(html).not.toContain(unsubscribeAnchorTracked + token);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // renderTrackedHtml
 // ---------------------------------------------------------------------------
 

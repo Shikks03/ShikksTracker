@@ -3,6 +3,7 @@ import Contact, { IContact } from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
 import { Types } from "mongoose";
+import { randomUUID } from "crypto";
 
 /** Trim and lowercase an email address. */
 export function normalizeEmail(email: string): string {
@@ -74,7 +75,9 @@ export async function createContactChecked(
     return { outcome: "duplicate" };
   }
 
-  // 4. Insert — new contacts are immediately due for their stage-1 draft (spec §9)
+  // 4. Insert — new contacts are immediately due for their stage-1 draft (spec §9).
+  // unsubscribeToken is also set by the Mongoose schema default, but explicit here
+  // so the value is visible in the creation path and in tests.
   const contact = await Contact.create({
     businessName: input.businessName,
     contactEmail: normalizedEmail,
@@ -84,6 +87,7 @@ export async function createContactChecked(
     campaignId: input.campaignId,
     importMethod,
     nextSendAt: new Date(),
+    unsubscribeToken: randomUUID(),
   });
 
   return { outcome: "inserted", contact };

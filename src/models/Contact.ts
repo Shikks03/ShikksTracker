@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
+import { randomUUID } from "crypto";
 
 export interface IContact extends Document {
   businessName: string;
@@ -25,6 +26,13 @@ export interface IContact extends Document {
   nextActionAt: Date | null;
   /** Optional note describing what action to take. null = no note. */
   nextActionNote: string | null;
+  /**
+   * Per-contact UUID used in the one-click unsubscribe link embedded in every
+   * outbound email. Keeps the link token opaque — does not expose contactId.
+   * Assigned at creation; never changes (rotation would break any outstanding
+   * emails). Lookup: GET /api/unsubscribe/[token].
+   */
+  unsubscribeToken: string;
   createdAt: Date;
 }
 
@@ -68,6 +76,13 @@ const ContactSchema = new Schema<IContact>(
     nextSendAt: { type: Date, default: null },
     nextActionAt: { type: Date, default: null },
     nextActionNote: { type: String, default: null },
+    unsubscribeToken: {
+      type: String,
+      default: () => randomUUID(),
+      // Sparse unique index: the token is always set on new contacts but may be
+      // absent on very old docs created before this field was added (pre-migration).
+      // The route handles the missing-token case gracefully (neutral response).
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
@@ -78,6 +93,9 @@ ContactSchema.index({ contactEmail: 1, campaignId: 1 }, { unique: true });
 ContactSchema.index({ status: 1, nextSendAt: 1 });
 // Next-action reminder query — sparse so null entries are not indexed
 ContactSchema.index({ nextActionAt: 1 }, { sparse: true });
+// Unsubscribe token lookup — sparse+unique; sparse means null/absent docs are excluded
+// (pre-migration contacts without a token are not counted against the uniqueness constraint)
+ContactSchema.index({ unsubscribeToken: 1 }, { unique: true, sparse: true });
 
 const Contact =
   (mongoose.models.Contact as mongoose.Model<IContact>) ||

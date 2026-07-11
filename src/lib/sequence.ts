@@ -540,7 +540,28 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     // path-independent (fills {{businessName}}/{{contactName}} regardless of
     // how the log was created: batch compose, single compose, or AI draft).
     subjectToSend = applyPlaceholders(subjectToSend, contact);
-    const bodyToSend = applyPlaceholders(log.body, contact);
+    let bodyToSend = applyPlaceholders(log.body, contact);
+
+    // --- Unsubscribe link (Task 6.2) ---
+    // Rationale: reduces reliance on the fragile keyword opt-out matcher and is
+    // the single best deliverability investment; both mechanisms (link + reply STOP)
+    // coexist — the existing "reply STOP" line is kept below.
+    //
+    // Appended AFTER placeholder substitution (token is not a placeholder),
+    // BEFORE the tracking rewrite so the URL is present when renderTrackedHtml runs.
+    // extractAndRewriteLinks deliberately excludes /api/unsubscribe/ URLs so this
+    // link reaches the recipient as a plain anchor, not a click-tracked redirect.
+    const baseUrl = process.env.APP_BASE_URL;
+    if (baseUrl) {
+      // Ensure the contact has an unsubscribeToken (pre-migration docs may lack one).
+      let token: string = contact.unsubscribeToken ?? "";
+      if (!token) {
+        token = randomUUID();
+        await Contact.findByIdAndUpdate(contact._id, { unsubscribeToken: token });
+      }
+      const unsubUrl = `${baseUrl}/api/unsubscribe/${token}`;
+      bodyToSend = `${bodyToSend}\n\nUnsubscribe: ${unsubUrl}`;
+    }
 
     // Tracking IDs (not persisted until post-send update so failed sends retry cleanly)
     const trackingPixelId = randomUUID();

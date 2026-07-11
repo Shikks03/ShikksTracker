@@ -21,6 +21,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/track/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/api/test/") ||
+    pathname.startsWith("/api/unsubscribe/") || // recipients click this; they are NOT logged in
     pathname.startsWith("/_next/")
   ) {
     return true;

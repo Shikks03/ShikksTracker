@@ -59,8 +59,37 @@ type TrackingLink = { url: string; trackingId: string };
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns true when a URL is the own-domain unsubscribe endpoint and should
+ * NOT be click-tracked. We match on the path prefix rather than on the full
+ * URL so the check works regardless of scheme, port, or env value.
+ *
+ * Rationale: click-tracking the unsubscribe link would (a) add a redirect hop
+ * that might be flagged by spam filters, and (b) log a "click" event for an
+ * unsubscribe action, corrupting engagement scores. The unsubscribe route
+ * records the opt-out itself; no separate tracking needed.
+ */
+function isUnsubscribeUrl(url: string): boolean {
+  const baseUrl = process.env.APP_BASE_URL;
+  if (!baseUrl) return false;
+  try {
+    const parsed = new URL(url);
+    const base = new URL(baseUrl);
+    return (
+      parsed.hostname === base.hostname &&
+      parsed.pathname.startsWith("/api/unsubscribe/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Scans a plain-text body for URLs and returns one tracking entry per unique
  * URL. Duplicate URLs in the body share a single trackingId.
+ *
+ * Unsubscribe URLs (own-domain /api/unsubscribe/*) are deliberately excluded:
+ * they must reach the recipient as plain anchors, not click-redirect links.
+ * See isUnsubscribeUrl() above for rationale.
  */
 export function extractAndRewriteLinks(body: string): { links: TrackingLink[] } {
   const urlMap = new Map<string, string>(); // url → trackingId
@@ -70,7 +99,7 @@ export function extractAndRewriteLinks(body: string): { links: TrackingLink[] } 
   while ((match = URL_RE.exec(body)) !== null) {
     const raw = match[1];
     const url = stripTrailingPunct(raw);
-    if (url && !urlMap.has(url)) {
+    if (url && !urlMap.has(url) && !isUnsubscribeUrl(url)) {
       urlMap.set(url, randomUUID());
     }
   }
