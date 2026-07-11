@@ -8,6 +8,8 @@ export interface ICronRun extends Document {
   errorCount: number;
   /** Set to the timestamp when an error digest was emailed for this run's Manila day. */
   digestSentAt: Date | null;
+  /** Set to the timestamp when an action-reminder digest was emailed for this run's Manila day. */
+  actionDigestSentAt: Date | null;
 }
 
 const CronRunSchema = new Schema<ICronRun>({
@@ -16,6 +18,7 @@ const CronRunSchema = new Schema<ICronRun>({
   summary: { type: Schema.Types.Mixed, required: true },
   errorCount: { type: Number, required: true },
   digestSentAt: { type: Date, default: null },
+  actionDigestSentAt: { type: Date, default: null },
 });
 
 // TTL index: auto-expire documents 30 days after startedAt

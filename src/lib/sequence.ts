@@ -761,6 +761,178 @@ export interface RunSummary {
   sent: number;
   skipped: string[];
   errors: string[];
+  /** Number of contacts with nextActionAt <= now at the time of this run. */
+  actionRemindersDue: number;
+  /** True if an action-reminder digest email was sent this run. */
+  actionDigestSent: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Exported pure helpers for next-action reminders (unit-testable, no DB)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a contact's nextActionAt is due (non-null and <= now).
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function isNextActionDue(nextActionAt: Date | null | undefined, now: Date): boolean {
+  if (!nextActionAt) return false;
+  return nextActionAt.getTime() <= now.getTime();
+}
+
+/**
+ * Returns the number of whole days the action is overdue (positive integer)
+ * or 0 when due today / in the future.
+ *
+ * "Days overdue" is computed in Manila time: we diff the Manila-day-start of
+ * `now` against the Manila-day-start of `nextActionAt`. This means an action
+ * due on Manila Monday is not "overdue" during Manila Monday itself (even if
+ * the cron runs early morning UTC) — it becomes 1 day overdue on Manila Tuesday.
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function daysOverdue(nextActionAt: Date, now: Date): number {
+  const actionDayStart = getManilaDayStart(nextActionAt);
+  const nowDayStart    = getManilaDayStart(now);
+  const diffMs = nowDayStart.getTime() - actionDayStart.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Returns true when an action-reminder digest should be suppressed because one
+ * was already sent for this Manila calendar day.
+ *
+ * `lastActionDigestSentAt` is the `actionDigestSentAt` value from any prior
+ * CronRun doc for the current Manila day (null/undefined = no prior digest).
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export function shouldSuppressActionDigest(
+  lastActionDigestSentAt: Date | null | undefined,
+  now: Date
+): boolean {
+  if (!lastActionDigestSentAt) return false;
+  const digestDay = getManilaDayStart(lastActionDigestSentAt);
+  const nowDay    = getManilaDayStart(now);
+  return digestDay.getTime() === nowDay.getTime();
+}
+
+// ---------------------------------------------------------------------------
+// Phase D: sendActionReminders
+// ---------------------------------------------------------------------------
+
+interface ActionRemindersResult {
+  due: number;
+  digestSent: boolean;
+  errors: string[];
+}
+
+/**
+ * Queries contacts with nextActionAt <= now, throttles to one digest per Manila
+ * day (separate from the error-digest throttle), and emails the user a list of
+ * overdue next actions.
+ *
+ * Does NOT auto-clear nextActionAt — that clears only when the user acts via the
+ * dashboard.
+ */
+async function sendActionReminders(cronRunId: string): Promise<ActionRemindersResult> {
+  const result: ActionRemindersResult = { due: 0, digestSent: false, errors: [] };
+  const now = new Date();
+
+  // Query contacts with a due next action
+  const dueContacts = await Contact.find({
+    nextActionAt: { $lte: now, $ne: null },
+  })
+    .sort({ nextActionAt: 1 }) // oldest-due first
+    .lean();
+
+  result.due = dueContacts.length;
+
+  if (dueContacts.length === 0) return result;
+
+  // Throttle: one digest per Manila day — check prior runs for this day
+  const dayStart = getManilaDayStart(now);
+  const priorDigest = await CronRun.findOne({
+    startedAt: { $gte: dayStart },
+    actionDigestSentAt: { $ne: null },
+    _id: { $ne: cronRunId },
+  }).lean();
+
+  if (priorDigest?.actionDigestSentAt) {
+    // Already sent one today — suppress
+    return result;
+  }
+
+  // Build the digest email
+  const gmail = getGmailClient();
+  let selfAddress: string | null = null;
+  try {
+    selfAddress = await getSenderAddress(gmail);
+  } catch (addrErr) {
+    result.errors.push(
+      `Action reminders: could not resolve sender address — ${addrErr instanceof Error ? addrErr.message : String(addrErr)}`
+    );
+    return result;
+  }
+
+  if (!selfAddress) return result;
+
+  const baseUrl = process.env.APP_BASE_URL ?? "";
+
+  const rows = dueContacts.map((c) => {
+    const name  = htmlEscape(c.businessName);
+    const note  = c.nextActionNote ? htmlEscape(c.nextActionNote) : "<em>No note</em>";
+    const days  = daysOverdue(c.nextActionAt!, now);
+    const overdueTxt = days > 0 ? `${days}d overdue` : "Due today";
+    const link  = baseUrl
+      ? `<a href="${encodeURI(`${baseUrl}/contacts/${String(c._id)}`)}">${name}</a>`
+      : name;
+    return `<tr>
+      <td style="padding:6px 12px 6px 0">${link}</td>
+      <td style="padding:6px 12px 6px 0">${note}</td>
+      <td style="padding:6px 0;white-space:nowrap">${htmlEscape(overdueTxt)}</td>
+    </tr>`;
+  }).join("\n");
+
+  const reviewLink = baseUrl
+    ? `<p><a href="${htmlEscape(baseUrl)}">Open dashboard</a></p>`
+    : "";
+
+  const htmlBody = `
+    <h2>Next-action reminders</h2>
+    <p>${dueContacts.length} contact${dueContacts.length !== 1 ? "s" : ""} need${dueContacts.length === 1 ? "s" : ""} your attention:</p>
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:4px 12px 4px 0;font-size:11px;text-transform:uppercase;color:#8E836C">Contact</th>
+          <th style="text-align:left;padding:4px 12px 4px 0;font-size:11px;text-transform:uppercase;color:#8E836C">Note</th>
+          <th style="text-align:left;padding:4px 0;font-size:11px;text-transform:uppercase;color:#8E836C">Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${reviewLink}
+  `.trim();
+
+  try {
+    await sendGmailMessage({
+      to: selfAddress,
+      subject: `[ShikksTracker] ${dueContacts.length} follow-up action${dueContacts.length !== 1 ? "s" : ""} due`,
+      htmlBody,
+    });
+
+    // Mark the current CronRun doc with actionDigestSentAt
+    await CronRun.findByIdAndUpdate(cronRunId, { actionDigestSentAt: new Date() });
+    result.digestSent = true;
+  } catch (sendErr) {
+    result.errors.push(
+      `Action reminders digest: send failed — ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`
+    );
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -816,6 +988,64 @@ export async function runSequenceEngine(): Promise<RunSummary> {
   // C: Send approved
   const sendsResult = await sendApproved(runStartMs);
 
+  // Build a partial summary (without action-reminder fields, which need cronRunId)
+  const partialErrors = [...repliesResult.errors, ...draftsResult.errors, ...sendsResult.errors];
+  const errorCount = partialErrors.length;
+  const durationMs = Date.now() - runStartMs;
+
+  // Persist the CronRun doc — must not throw out of the engine.
+  let cronRunId: string | null = null;
+  try {
+    const cronRun = await CronRun.create({
+      startedAt,
+      durationMs,
+      summary: {
+        staleSendingReverted: sweepResult.reverted,
+        repliesChecked: repliesResult.checked,
+        replied: repliesResult.replied,
+        unsubscribed: repliesResult.unsubscribed,
+        bounced: repliesResult.bounced,
+        draftsCreated: draftsResult.created,
+        sent: sendsResult.sent,
+        skipped: sendsResult.skipped,
+        errors: partialErrors,
+        actionRemindersDue: 0,
+        actionDigestSent: false,
+      } satisfies RunSummary,
+      errorCount,
+      digestSentAt: null,
+      actionDigestSentAt: null,
+    });
+    cronRunId = String(cronRun._id);
+  } catch (persistErr) {
+    console.error("[sequence] CronRun persist failed:", persistErr);
+    // Logging failure must not crash the engine — return summary as-is.
+    return {
+      staleSendingReverted: sweepResult.reverted,
+      repliesChecked: repliesResult.checked,
+      replied: repliesResult.replied,
+      unsubscribed: repliesResult.unsubscribed,
+      bounced: repliesResult.bounced,
+      draftsCreated: draftsResult.created,
+      sent: sendsResult.sent,
+      skipped: sendsResult.skipped,
+      errors: partialErrors,
+      actionRemindersDue: 0,
+      actionDigestSent: false,
+    };
+  }
+
+  // D: Send next-action reminders (after CronRun is persisted so we can update it)
+  let actionRemindersResult: ActionRemindersResult = { due: 0, digestSent: false, errors: [] };
+  try {
+    actionRemindersResult = await sendActionReminders(cronRunId);
+  } catch (actionErr) {
+    console.error("[sequence] action reminders step failed:", actionErr);
+    actionRemindersResult.errors.push(
+      `Action reminders step error: ${actionErr instanceof Error ? actionErr.message : String(actionErr)}`
+    );
+  }
+
   const summary: RunSummary = {
     staleSendingReverted: sweepResult.reverted,
     repliesChecked: repliesResult.checked,
@@ -825,31 +1055,17 @@ export async function runSequenceEngine(): Promise<RunSummary> {
     draftsCreated: draftsResult.created,
     sent: sendsResult.sent,
     skipped: sendsResult.skipped,
-    errors: [...repliesResult.errors, ...draftsResult.errors, ...sendsResult.errors],
+    errors: [...partialErrors, ...actionRemindersResult.errors],
+    actionRemindersDue: actionRemindersResult.due,
+    actionDigestSent: actionRemindersResult.digestSent,
   };
 
-  // Derive errorCount: count entries in the combined errors array only.
-  // Normal outcomes (skipped, replied, unsubscribed, bounced, staleSendingReverted)
-  // are not errors — they are expected operational states.
-  const errorCount = summary.errors.length;
-
-  const durationMs = Date.now() - runStartMs;
-
-  // Persist the CronRun doc — must not throw out of the engine.
-  let cronRunId: string | null = null;
+  // Update the persisted CronRun with final summary (including action-reminder results)
   try {
-    const cronRun = await CronRun.create({
-      startedAt,
-      durationMs,
-      summary,
-      errorCount,
-      digestSentAt: null,
-    });
-    cronRunId = String(cronRun._id);
-  } catch (persistErr) {
-    console.error("[sequence] CronRun persist failed:", persistErr);
-    // Logging failure must not crash the engine — return summary as-is.
-    return summary;
+    await CronRun.findByIdAndUpdate(cronRunId, { summary });
+  } catch (updateErr) {
+    console.error("[sequence] CronRun summary update failed:", updateErr);
+    // Non-fatal — proceed with return
   }
 
   // Error digest: send an email-to-self if there were errors OR any EmailLog

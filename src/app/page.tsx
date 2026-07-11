@@ -63,6 +63,8 @@ interface ContactRow {
   replySnippet?: string | null;
   lastLogStage?: 1 | 2 | 3 | null;
   lastLogStatus?: "draft" | "approved" | "sent" | null;
+  nextActionAt?: string | null;
+  nextActionNote?: string | null;
 }
 
 type RowGroup = "replied" | "in_sequence" | "closed";
@@ -101,6 +103,36 @@ function getManilaGreeting(): string {
 
 function getManilaHour(): number {
   return (new Date().getUTCHours() + 8) % 24;
+}
+
+/**
+ * Returns the UTC ms for Manila midnight of the given date (Manila = UTC+8, no DST).
+ * Mirrors getManilaDayStart from sequence.ts for client-side use.
+ */
+function getManilaDayStartMs(date: Date): number {
+  const manilaOffsetMs = 8 * 60 * 60 * 1000;
+  const manilaMs = date.getTime() + manilaOffsetMs;
+  const dayStartMs = Math.floor(manilaMs / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+  return dayStartMs - manilaOffsetMs;
+}
+
+/**
+ * Returns a chip label for a nextActionAt date relative to Manila today, or null.
+ *  - Past Manila day  → "OVERDUE {n}D"
+ *  - Same Manila day  → "DUE TODAY"
+ *  - Future / null    → null (no chip)
+ */
+function nextActionChipLabel(nextActionAt: string | null | undefined): string | null {
+  if (!nextActionAt) return null;
+  const actionMs = new Date(nextActionAt).getTime();
+  const now = new Date();
+  if (isNaN(actionMs)) return null;
+  const nowDayStartMs    = getManilaDayStartMs(now);
+  const actionDayStartMs = getManilaDayStartMs(new Date(actionMs));
+  if (actionDayStartMs > nowDayStartMs) return null; // future
+  if (actionDayStartMs === nowDayStartMs) return "DUE TODAY";
+  const daysOver = Math.floor((nowDayStartMs - actionDayStartMs) / (24 * 60 * 60 * 1000));
+  return `OVERDUE ${daysOver}D`;
 }
 
 function isWithinSendWindow(): boolean {
@@ -168,6 +200,7 @@ function ContactRowItem({
   const isHot  = (c.engagementScore ?? 0) >= HOT_THRESHOLD;
   const ord    = ordinal(c.lastLogStage);
   const score  = c.engagementScore ?? 0;
+  const actionChip = group === "replied" ? nextActionChipLabel(c.nextActionAt) : null;
 
   let meta = "";
   if (group === "replied")      meta = repliedMeta(c);
@@ -213,6 +246,26 @@ function ContactRowItem({
             {c.businessName}
           </span>
           {isHot && <HotChip />}
+          {actionChip && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                border: `1px solid ${actionChip.startsWith("OVERDUE") ? CLAY : AMBER}`,
+                color: actionChip.startsWith("OVERDUE") ? CLAY : AMBER_TEXT,
+                backgroundColor: actionChip.startsWith("OVERDUE") ? "#FDF3EF" : "#FEF5E4",
+                borderRadius: 4,
+                padding: "2px 8px",
+                lineHeight: 1.6,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {actionChip}
+            </span>
+          )}
         </div>
         <div
           style={{
@@ -381,6 +434,17 @@ export default function Dashboard() {
   const repliedGroup = [...filtered]
     .filter((c) => ["replied", "call_booked", "proposal_sent"].includes(c.pipelineStage))
     .sort((a, b) => {
+      // Sort overdue-first: contacts with a past nextActionAt bubble to the top.
+      // "Overdue" = nextActionAt is non-null AND in a past Manila day.
+      const now = new Date();
+      const nowDayStartMs = getManilaDayStartMs(now);
+      const aOverdue = a.nextActionAt &&
+        getManilaDayStartMs(new Date(a.nextActionAt)) < nowDayStartMs;
+      const bOverdue = b.nextActionAt &&
+        getManilaDayStartMs(new Date(b.nextActionAt)) < nowDayStartMs;
+      if (aOverdue && !bOverdue) return -1;
+      if (!aOverdue && bOverdue) return 1;
+      // Within the same overdue/non-overdue group, sort by most-recently-replied
       const da = a.repliedAt ? new Date(a.repliedAt).getTime() : 0;
       const db = b.repliedAt ? new Date(b.repliedAt).getTime() : 0;
       return db - da;

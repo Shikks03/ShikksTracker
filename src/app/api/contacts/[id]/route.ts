@@ -7,6 +7,8 @@ import { suppressContact } from "@/lib/contacts";
 
 export const dynamic = "force-dynamic";
 
+const NEXT_ACTION_NOTE_MAX_LENGTH = 500;
+
 const UPDATABLE_FIELDS = [
   "contactName",
   "keyPoints",
@@ -14,6 +16,8 @@ const UPDATABLE_FIELDS = [
   "pipelineStage",
   "nextSendAt",
   "businessName",
+  "nextActionAt",
+  "nextActionNote",
 ] as const;
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -71,6 +75,39 @@ export async function PATCH(
       const updated = await Contact.findById(id).lean();
       if (!updated) return notFound(id);
       return NextResponse.json(updated);
+    }
+
+    // Validate nextActionAt — must cast to a valid Date or be null
+    if ("nextActionAt" in body) {
+      const raw = body.nextActionAt;
+      if (raw !== null && raw !== undefined) {
+        const d = new Date(raw as string | number);
+        if (isNaN(d.getTime())) {
+          return NextResponse.json(
+            { error: "nextActionAt must be a valid date string or null" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // Validate nextActionNote — max 500 chars
+    if ("nextActionNote" in body) {
+      const note = body.nextActionNote;
+      if (note !== null && note !== undefined) {
+        if (typeof note !== "string") {
+          return NextResponse.json(
+            { error: "nextActionNote must be a string or null" },
+            { status: 400 }
+          );
+        }
+        if (note.length > NEXT_ACTION_NOTE_MAX_LENGTH) {
+          return NextResponse.json(
+            { error: `nextActionNote must be ${NEXT_ACTION_NOTE_MAX_LENGTH} characters or fewer` },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     // Non-suppression status changes (and all other field updates) — original path

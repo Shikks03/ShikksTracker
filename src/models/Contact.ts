@@ -21,6 +21,10 @@ export interface IContact extends Document {
     | "lost";
   engagementScore: number;
   nextSendAt: Date | null;
+  /** Human-scheduled follow-up date. null = no action scheduled. */
+  nextActionAt: Date | null;
+  /** Optional note describing what action to take. null = no note. */
+  nextActionNote: string | null;
   createdAt: Date;
 }
 
@@ -62,6 +66,8 @@ const ContactSchema = new Schema<IContact>(
     },
     engagementScore: { type: Number, default: 0 },
     nextSendAt: { type: Date, default: null },
+    nextActionAt: { type: Date, default: null },
+    nextActionNote: { type: String, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
@@ -70,6 +76,8 @@ const ContactSchema = new Schema<IContact>(
 ContactSchema.index({ contactEmail: 1, campaignId: 1 }, { unique: true });
 // Sequence-engine query
 ContactSchema.index({ status: 1, nextSendAt: 1 });
+// Next-action reminder query — sparse so null entries are not indexed
+ContactSchema.index({ nextActionAt: 1 }, { sparse: true });
 
 const Contact =
   (mongoose.models.Contact as mongoose.Model<IContact>) ||

@@ -98,6 +98,8 @@ interface Contact {
   pipelineStage: string;
   engagementScore: number;
   campaignId?: string;
+  nextActionAt?: string | null;
+  nextActionNote?: string | null;
 }
 
 interface EmailLog {
@@ -173,6 +175,12 @@ export default function ContactDetailPage() {
   const [kpSaving,  setKpSaving]  = useState(false);
   const [kpMsg,     setKpMsg]     = useState<string | null>(null);
 
+  // Next-action editing
+  const [nextActionAt,   setNextActionAt]   = useState<string>("");
+  const [nextActionNote, setNextActionNote] = useState<string>("");
+  const [naSaving,       setNaSaving]       = useState(false);
+  const [naMsg,          setNaMsg]          = useState<string | null>(null);
+
   // Generic patch (pipeline / status)
   const [saving,   setSaving]   = useState(false);
   const [patchMsg, setPatchMsg] = useState<string | null>(null);
@@ -196,6 +204,11 @@ export default function ContactDetailPage() {
     if (contactRes.data) {
       setContact(contactRes.data);
       setKeyPoints(contactRes.data.keyPoints ?? "");
+      // Initialise next-action inputs from saved values.
+      // nextActionAt is a ISO string — convert to the date portion for the date input.
+      const savedAt = contactRes.data.nextActionAt ?? "";
+      setNextActionAt(savedAt ? savedAt.slice(0, 10) : "");
+      setNextActionNote(contactRes.data.nextActionNote ?? "");
     }
     if (logsRes.data)      setLogs(logsRes.data);
     if (campaignsRes.data) setCampaigns(campaignsRes.data);
@@ -215,6 +228,44 @@ export default function ContactDetailPage() {
     if (data)  { setContact(data); }
     setPatchMsg("Saved.");
     setTimeout(() => setPatchMsg(null), 2000);
+  }
+
+  async function handleSaveNextAction() {
+    setNaSaving(true);
+    const { data, error } = await apiFetch<Contact>(`/api/contacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        nextActionAt: nextActionAt ? new Date(nextActionAt).toISOString() : null,
+        nextActionNote: nextActionNote.trim() || null,
+      }),
+    });
+    setNaSaving(false);
+    if (error) { setNaMsg(`Error: ${error}`); return; }
+    if (data)  {
+      setContact(data);
+      const savedAt = data.nextActionAt ?? "";
+      setNextActionAt(savedAt ? savedAt.slice(0, 10) : "");
+      setNextActionNote(data.nextActionNote ?? "");
+    }
+    setNaMsg("Saved.");
+    setTimeout(() => setNaMsg(null), 2000);
+  }
+
+  async function handleClearNextAction() {
+    setNaSaving(true);
+    const { data, error } = await apiFetch<Contact>(`/api/contacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ nextActionAt: null, nextActionNote: null }),
+    });
+    setNaSaving(false);
+    if (error) { setNaMsg(`Error: ${error}`); return; }
+    if (data)  {
+      setContact(data);
+      setNextActionAt("");
+      setNextActionNote("");
+    }
+    setNaMsg("Cleared.");
+    setTimeout(() => setNaMsg(null), 2000);
   }
 
   async function handleSaveKeyPoints() {
@@ -953,6 +1004,107 @@ export default function ContactDetailPage() {
                   }}
                 >
                   {kpMsg}
+                </MonoLabel>
+              </div>
+            )}
+          </Panel>
+
+          {/* ── NEXT ACTION PANEL ── */}
+          <Panel style={{ padding: "22px 26px" }}>
+            <MonoLabel
+              style={{ fontSize: 11, letterSpacing: "0.14em", color: FAINT }}
+            >
+              NEXT ACTION
+            </MonoLabel>
+
+            {/* Date input */}
+            <div style={{ marginTop: 14 }}>
+              <MonoLabel style={{ fontSize: 10, color: FAINT, display: "block", marginBottom: 6 }}>
+                DATE
+              </MonoLabel>
+              <input
+                type="date"
+                value={nextActionAt}
+                onChange={(e) => setNextActionAt(e.target.value)}
+                style={{
+                  fontFamily: mono,
+                  fontSize: 13,
+                  color: INK,
+                  backgroundColor: "transparent",
+                  border: "1px solid #D3C9B4",
+                  borderRadius: 6,
+                  padding: "7px 10px",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            {/* Note input */}
+            <div style={{ marginTop: 14 }}>
+              <MonoLabel style={{ fontSize: 10, color: FAINT, display: "block", marginBottom: 6 }}>
+                NOTE
+              </MonoLabel>
+              <textarea
+                value={nextActionNote}
+                onChange={(e) => setNextActionNote(e.target.value)}
+                maxLength={500}
+                placeholder="e.g. Follow up on proposal"
+                style={{
+                  fontFamily: grotesk,
+                  fontSize: 14,
+                  color: "#2A251C",
+                  lineHeight: 1.5,
+                  backgroundColor: "transparent",
+                  border: "1px solid #D3C9B4",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                  width: "100%",
+                  minHeight: 72,
+                  resize: "vertical",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Save / Clear buttons */}
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <Button
+                variant="primary"
+                disabled={naSaving}
+                onClick={handleSaveNextAction}
+              >
+                {naSaving ? "Saving…" : "Save"}
+              </Button>
+              {(contact.nextActionAt || contact.nextActionNote) && (
+                <Button
+                  variant="outline"
+                  disabled={naSaving}
+                  onClick={handleClearNextAction}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {naMsg && (
+              <div style={{ marginTop: 8 }}>
+                <MonoLabel
+                  style={{
+                    fontSize: 10.5,
+                    color: naMsg.startsWith("Error") ? CLAY : "#5A7D5A",
+                  }}
+                >
+                  {naMsg}
                 </MonoLabel>
               </div>
             )}
