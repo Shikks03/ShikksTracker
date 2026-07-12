@@ -246,6 +246,26 @@ function ContactRowItem({
             {c.businessName}
           </span>
           {isHot && <HotChip />}
+          {c.status !== "active" && c.status !== "replied" && (
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                border: `1px solid ${c.status === "bounced" || c.status === "unsubscribed" ? CLAY : FAINT}`,
+                color: c.status === "bounced" || c.status === "unsubscribed" ? CLAY : FAINT,
+                backgroundColor: c.status === "bounced" || c.status === "unsubscribed" ? "#FDF3EF" : "transparent",
+                borderRadius: 4,
+                padding: "2px 8px",
+                lineHeight: 1.6,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {c.status.toUpperCase()}
+            </span>
+          )}
           {actionChip && (
             <span
               style={{
@@ -356,6 +376,7 @@ export default function Dashboard() {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [draftCount,    setDraftCount]    = useState(0);
+  const [approvedCount, setApprovedCount] = useState(0);
   const [configError,   setConfigError]   = useState<string | null>(null); // campaigns/draft-count/cron-run load failures (previously swallowed)
   const [lastCronRun,   setLastCronRun]   = useState<CronRunDoc | null | "none">(null); // null=loading, "none"=no runs yet
 
@@ -381,6 +402,13 @@ export default function Dashboard() {
       ({ data, error }) => {
         if (Array.isArray(data)) setDraftCount(data.length);
         else if (error) setConfigError(`Couldn't load draft count — ${error}`);
+      }
+    );
+
+    apiFetch<{ length: number }[]>("/api/email-logs?status=approved").then(
+      ({ data, error }) => {
+        if (Array.isArray(data)) setApprovedCount(data.length);
+        else if (error) setConfigError(`Couldn't load approved count — ${error}`);
       }
     );
 
@@ -496,7 +524,7 @@ export default function Dashboard() {
               marginBottom: 10,
             }}
           >
-            {kickerDate} · {repliedGroup.length} REPLIED / {draftCount} DRAFTS
+            {kickerDate} · {repliedGroup.length} REPLIED / {draftCount} DRAFTS · {approvedCount} APPROVED
           </MonoLabel>
           <h1
             style={{

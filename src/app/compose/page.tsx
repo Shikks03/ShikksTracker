@@ -37,9 +37,10 @@ interface TemplateItem {
 export default function ComposePage() {
   const router = useRouter();
 
-  const [campaigns,   setCampaigns]   = useState<CampaignItem[]>([]);
-  const [campaignId,  setCampaignId]  = useState("");
-  const [contacts,    setContacts]    = useState<ContactItem[]>([]);
+  const [campaigns,        setCampaigns]        = useState<CampaignItem[]>([]);
+  const [campaignId,       setCampaignId]       = useState("");
+  const [contacts,         setContacts]         = useState<ContactItem[]>([]);
+  const [repliedContacts,  setRepliedContacts]  = useState<ContactItem[]>([]);
   const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set());
   const [subject,     setSubject]     = useState("");
   const [body,        setBody]        = useState("");
@@ -72,6 +73,7 @@ export default function ComposePage() {
     setCampaignId(id);
     setCheckedIds(new Set());
     setContacts([]);
+    setRepliedContacts([]);
     setResult(null);
     setFieldErrors({});
     setApiError(null);
@@ -86,6 +88,19 @@ export default function ComposePage() {
           setContacts(sorted);
         } else if (error) {
           setApiError(`Couldn't load contacts — ${error}`);
+        }
+      }
+    );
+
+    apiFetch<ContactItem[]>(`/api/contacts?campaignId=${id}&status=replied`).then(
+      ({ data, error }) => {
+        if (Array.isArray(data)) {
+          const sorted = [...data].sort((a, b) =>
+            a.businessName.localeCompare(b.businessName)
+          );
+          setRepliedContacts(sorted);
+        } else if (error) {
+          setApiError(`Couldn't load replied contacts — ${error}`);
         }
       }
     );
@@ -288,7 +303,7 @@ export default function ComposePage() {
                   )}
                 </div>
 
-                {contacts.length === 0 ? (
+                {contacts.length === 0 && repliedContacts.length === 0 ? (
                   <div style={{
                     fontFamily: mono, fontSize: 10.5, color: FAINT2,
                     textTransform: "uppercase", letterSpacing: "0.06em",
@@ -300,7 +315,7 @@ export default function ComposePage() {
                   <div style={{
                     border: `1px solid ${fieldErrors.recipients ? CLAY : "#C9BEA6"}`,
                     borderRadius: 6,
-                    maxHeight: 220,
+                    maxHeight: 260,
                     overflowY: "auto",
                     backgroundColor: "#F8F5EC",
                   }}>
@@ -327,6 +342,51 @@ export default function ComposePage() {
                           <span style={{ color: FAINT2 }}> ({c.contactEmail})</span>
                         </span>
                       </label>
+                    ))}
+                    {contacts.length === 0 && repliedContacts.length > 0 && (
+                      <div style={{
+                        fontFamily: mono, fontSize: 10.5, color: FAINT2,
+                        textTransform: "uppercase", letterSpacing: "0.06em",
+                        padding: "10px 14px",
+                      }}>
+                        NO ACTIVE CONTACTS
+                      </div>
+                    )}
+                    {repliedContacts.map((c, idx) => (
+                      <div
+                        key={c._id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 14px",
+                          borderTop: (contacts.length > 0 || idx > 0) ? "1px solid #E4DBC8" : "none",
+                          cursor: "default",
+                          opacity: 0.45,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled
+                          checked={false}
+                          style={{ width: 15, height: 15, flexShrink: 0, cursor: "not-allowed" }}
+                        />
+                        <span style={{ fontFamily: grotesk, fontSize: 14.5, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                          {c.businessName}
+                          <span style={{ color: FAINT2 }}> ({c.contactEmail})</span>
+                        </span>
+                        <span style={{
+                          fontFamily: mono,
+                          fontSize: 10,
+                          color: CLAY,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          flexShrink: 0,
+                          whiteSpace: "nowrap",
+                        }}>
+                          REPLIED — TAKE OVER PERSONALLY
+                        </span>
+                      </div>
                     ))}
                   </div>
                 )}
