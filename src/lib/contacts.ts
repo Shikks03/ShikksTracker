@@ -5,18 +5,11 @@ import Suppression from "@/models/Suppression";
 import { Types } from "mongoose";
 import { randomUUID } from "crypto";
 
-/** Trim and lowercase an email address. */
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-/**
- * Pragmatic email validation — not RFC-5321 complete, but handles the
- * vast majority of real-world addresses while rejecting obvious junk.
- */
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
-}
+// Pure email helpers live in email.ts (no server deps) — import for local use
+// and re-export for backward compatibility so all existing server-side imports
+// still work unchanged.
+import { normalizeEmail, isValidEmail } from "@/lib/email";
+export { normalizeEmail, isValidEmail };
 
 type LeadSource = "cold_email" | "referral" | "event_connection" | "other";
 

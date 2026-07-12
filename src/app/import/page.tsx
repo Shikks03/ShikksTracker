@@ -8,6 +8,7 @@ import {
   FOREST_ACTION as FOREST,
 } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
+import { previewCsv, CsvPreviewResult } from "@/lib/previewCsv";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,13 @@ interface LastImport {
 
 const LS_KEY = "lastImport";
 
+const LEAD_SOURCE_LABELS: Record<string, string> = {
+  cold_email:       "Cold Email",
+  referral:         "Referral",
+  event_connection: "Event Connection",
+  other:            "Other",
+};
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ImportPage() {
@@ -54,6 +62,11 @@ export default function ImportPage() {
   const [uploading,   setUploading]   = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lastImport,  setLastImport]  = useState<LastImport | null>(null);
+
+  // Preview state
+  const [pendingFile,   setPendingFile]   = useState<File | null>(null);
+  const [preview,       setPreview]       = useState<CsvPreviewResult | null>(null);
+  const [showAllInvalid, setShowAllInvalid] = useState(false);
 
   // Manual form
   const [businessName,   setBusinessName]   = useState("");
@@ -120,6 +133,9 @@ export default function ImportPage() {
       };
       localStorage.setItem(LS_KEY, JSON.stringify(li));
       setLastImport(li);
+      // Clear preview after successful upload
+      setPendingFile(null);
+      setPreview(null);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -128,9 +144,23 @@ export default function ImportPage() {
     }
   }
 
+  /** Parse a file client-side and show the preview panel (does not upload). */
+  async function handleFileSelected(file: File) {
+    setUploadError(null);
+    setShowAllInvalid(false);
+    try {
+      const text = await file.text();
+      const result = previewCsv(text);
+      setPendingFile(file);
+      setPreview(result);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) void uploadFile(file);
+    if (file) void handleFileSelected(file);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -144,7 +174,15 @@ export default function ImportPage() {
     e.preventDefault();
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) void uploadFile(file);
+    if (file) void handleFileSelected(file);
+  }
+
+  function handleCancelPreview() {
+    setPendingFile(null);
+    setPreview(null);
+    setUploadError(null);
+    setShowAllInvalid(false);
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   async function handleManualAdd(e: React.FormEvent) {
@@ -197,6 +235,11 @@ export default function ImportPage() {
     { key: "duplicates" as const, label: "DUPLICATES",  bg: "#F7EFD9", border: "#E2D3A8", color: "#96712A" },
     { key: "invalid"    as const, label: "INVALID",     bg: "#EFEBE0", border: "#D8CFBB", color: "#7A7263" },
   ] as const;
+
+  // Max sample rows to show in the preview table
+  const SAMPLE_MAX = 5;
+  // Max invalid rows to show before "show all" toggle
+  const INVALID_SHOW_MAX = 5;
 
   return (
     <div className="page-enter" style={{ maxWidth: 560, margin: "0 auto", padding: "44px 42px 80px" }}>
@@ -289,109 +332,468 @@ export default function ImportPage() {
             style={{ display: "none" }}
             onChange={handleFileChange}
           />
-          <div
-            onClick={() => { if (!uploading) fileRef.current?.click(); }}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            style={{
-              backgroundColor: isDragOver ? "#F1E9D2" : "#F5EFDF",
-              border: `1.5px dashed ${isDragOver ? "#A99E86" : "#CBBF9F"}`,
-              borderRadius: 10,
-              padding: "50px 28px",
-              textAlign: "center",
-              cursor: uploading ? "default" : "pointer",
-              transition: "all 0.1s",
-            }}
-          >
-            {/* Upload icon tile */}
-            <div
-              style={{
-                display: "inline-flex",
-                width: 40,
-                height: 40,
-                backgroundColor: "#FCFAF3",
-                border: "1px solid #D3C9B4",
-                borderRadius: 8,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Upload size={16} color="#5A5344" />
-            </div>
 
-            {uploading ? (
-              <div style={{ marginTop: 16 }}>
-                <span
+          {/* ── Preview panel (shown after file is selected) ── */}
+          {preview && pendingFile ? (
+            <div>
+              {/* Preview header */}
+              <Panel style={{ padding: "18px 20px 16px" }}>
+                {/* Title row */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.12em",
+                        color: FAINT,
+                      }}
+                    >
+                      Preview
+                    </span>
+                    <div
+                      style={{
+                        fontFamily: grotesk,
+                        fontWeight: 600,
+                        fontSize: 15,
+                        color: INK,
+                        marginTop: 4,
+                      }}
+                    >
+                      {pendingFile.name}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCancelPreview}
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: FAINT2,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px 6px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {/* Stat bar */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                    marginTop: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      backgroundColor: preview.validRows.length > 0 ? "#EAF2E7" : "#F5EFDF",
+                      border: `1px solid ${preview.validRows.length > 0 ? "#C6D8C0" : "#CBBF9F"}`,
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 28,
+                        fontWeight: 400,
+                        color: preview.validRows.length > 0 ? "#1C6E3A" : "#7A7263",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {preview.validRows.length}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.1em",
+                        color: preview.validRows.length > 0 ? "#1C6E3A" : "#7A7263",
+                        marginTop: 6,
+                      }}
+                    >
+                      Ready to import
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      backgroundColor: preview.invalidRows.length > 0 ? "#F7E8E2" : "#F5EFDF",
+                      border: `1px solid ${preview.invalidRows.length > 0 ? "#E0C4B8" : "#CBBF9F"}`,
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 28,
+                        fontWeight: 400,
+                        color: preview.invalidRows.length > 0 ? "#A23B28" : "#7A7263",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {preview.invalidRows.length}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.1em",
+                        color: preview.invalidRows.length > 0 ? "#A23B28" : "#7A7263",
+                        marginTop: 6,
+                      }}
+                    >
+                      Invalid (will skip)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scope note */}
+                <div
                   style={{
                     fontFamily: mono,
-                    fontSize: 10.5,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: FAINT,
+                    fontSize: 10,
+                    color: FAINT2,
+                    letterSpacing: "0.05em",
+                    marginTop: 12,
+                    lineHeight: 1.6,
                   }}
                 >
-                  UPLOADING…
-                </span>
-              </div>
-            ) : (
-              <>
-                <div
-                  style={{
-                    fontFamily: grotesk,
-                    fontWeight: 600,
-                    fontSize: 16,
-                    color: INK,
-                    marginTop: 16,
-                  }}
-                >
-                  Drop your CSV here
+                  Suppressed and duplicate rows are detected on import — not shown here.
                 </div>
-                <div
-                  style={{
-                    fontFamily: grotesk,
-                    fontSize: 14.5,
-                    color: "#5A5344",
-                    marginTop: 6,
-                  }}
-                >
-                  or{" "}
-                  <span style={{ color: FOREST, textDecoration: "underline" }}>
-                    browse files
-                  </span>
-                </div>
+              </Panel>
+
+              {/* Valid rows sample table */}
+              {preview.validRows.length > 0 && (
                 <div style={{ marginTop: 16 }}>
                   <div
                     style={{
                       fontFamily: mono,
                       fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
                       color: FAINT2,
-                      letterSpacing: "0.06em",
-                      lineHeight: 1.8,
+                      marginBottom: 8,
                     }}
                   >
-                    businessName · contactEmail · contactName
-                    <br />
-                    keyPoints · leadSource · campaignId
+                    {preview.validRows.length > SAMPLE_MAX
+                      ? `Sample — first ${SAMPLE_MAX} of ${preview.validRows.length} valid rows`
+                      : `Valid rows`}
+                  </div>
+                  <div
+                    style={{
+                      border: "1px solid #D3C9B4",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Table header */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "3fr 4fr 2fr",
+                        backgroundColor: "#F0EBE0",
+                        borderBottom: "1px solid #D3C9B4",
+                        padding: "6px 12px",
+                      }}
+                    >
+                      {["Business", "Email", "Lead Source"].map((h) => (
+                        <span
+                          key={h}
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 9.5,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                            color: FAINT2,
+                          }}
+                        >
+                          {h}
+                        </span>
+                      ))}
+                    </div>
+                    {/* Table rows */}
+                    {preview.validRows.slice(0, SAMPLE_MAX).map((row, idx) => (
+                      <div
+                        key={row.rowNumber}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "3fr 4fr 2fr",
+                          padding: "8px 12px",
+                          borderBottom: idx < Math.min(preview.validRows.length, SAMPLE_MAX) - 1
+                            ? "1px solid #EAE3D5"
+                            : "none",
+                          backgroundColor: idx % 2 === 0 ? "#FCFAF3" : "#F8F5EC",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontSize: 13,
+                            color: INK,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.businessName}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 11.5,
+                            color: "#5A5344",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.contactEmail}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 10,
+                            color: FAINT2,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          {LEAD_SOURCE_LABELS[row.leadSource] ?? row.leadSource}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </>
-            )}
-          </div>
-          {uploadError && (
-            <div style={{ marginTop: 14, textAlign: "center" }}>
-              <span
+              )}
+
+              {/* Invalid rows list */}
+              {preview.invalidRows.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      color: "#A23B28",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Invalid rows — will be skipped
+                  </div>
+                  <div
+                    style={{
+                      border: "1px solid #E0C4B8",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {(showAllInvalid
+                      ? preview.invalidRows
+                      : preview.invalidRows.slice(0, INVALID_SHOW_MAX)
+                    ).map((row, idx, arr) => (
+                      <div
+                        key={row.rowNumber}
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 10,
+                          padding: "7px 12px",
+                          borderBottom: idx < arr.length - 1 ? "1px solid #F2DDD6" : "none",
+                          backgroundColor: idx % 2 === 0 ? "#FDF5F2" : "#FAF0EC",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 9.5,
+                            color: "#C47A6A",
+                            flexShrink: 0,
+                            minWidth: 48,
+                          }}
+                        >
+                          ROW {row.rowNumber}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontSize: 13,
+                            color: "#7A3020",
+                          }}
+                        >
+                          {row.reason}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {preview.invalidRows.length > INVALID_SHOW_MAX && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllInvalid((v) => !v)}
+                      style={{
+                        marginTop: 8,
+                        fontFamily: mono,
+                        fontSize: 10,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: FAINT2,
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      {showAllInvalid
+                        ? "Show fewer"
+                        : `Show all ${preview.invalidRows.length} invalid rows`}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {uploadError && (
+                <div style={{ marginTop: 14, textAlign: "center" }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: CLAY,
+                    }}
+                  >
+                    {uploadError}
+                  </span>
+                </div>
+              )}
+
+              {/* Import confirm button */}
+              <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+                <Button
+                  variant="primary"
+                  disabled={uploading || preview.validRows.length === 0}
+                  onClick={() => { if (pendingFile) void uploadFile(pendingFile); }}
+                  style={{ flex: 1 }}
+                >
+                  {uploading
+                    ? "Importing…"
+                    : preview.validRows.length === 0
+                      ? "No valid rows to import"
+                      : `Import ${preview.validRows.length} row${preview.validRows.length === 1 ? "" : "s"}`}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  Change file
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* ── Dropzone (shown when no file is pending) ── */
+            <>
+              <div
+                onClick={() => { if (!uploading) fileRef.current?.click(); }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
                 style={{
-                  fontFamily: mono,
-                  fontSize: 10.5,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: CLAY,
+                  backgroundColor: isDragOver ? "#F1E9D2" : "#F5EFDF",
+                  border: `1.5px dashed ${isDragOver ? "#A99E86" : "#CBBF9F"}`,
+                  borderRadius: 10,
+                  padding: "50px 28px",
+                  textAlign: "center",
+                  cursor: uploading ? "default" : "pointer",
+                  transition: "all 0.1s",
                 }}
               >
-                {uploadError}
-              </span>
-            </div>
+                {/* Upload icon tile */}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    width: 40,
+                    height: 40,
+                    backgroundColor: "#FCFAF3",
+                    border: "1px solid #D3C9B4",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Upload size={16} color="#5A5344" />
+                </div>
+
+                <>
+                  <div
+                    style={{
+                      fontFamily: grotesk,
+                      fontWeight: 600,
+                      fontSize: 16,
+                      color: INK,
+                      marginTop: 16,
+                    }}
+                  >
+                    Drop your CSV here
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: grotesk,
+                      fontSize: 14.5,
+                      color: "#5A5344",
+                      marginTop: 6,
+                    }}
+                  >
+                    or{" "}
+                    <span style={{ color: FOREST, textDecoration: "underline" }}>
+                      browse files
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 16 }}>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10,
+                        color: FAINT2,
+                        letterSpacing: "0.06em",
+                        lineHeight: 1.8,
+                      }}
+                    >
+                      businessName · contactEmail · contactName
+                      <br />
+                      keyPoints · leadSource · campaignId
+                    </div>
+                  </div>
+                </>
+              </div>
+              {uploadError && (
+                <div style={{ marginTop: 14, textAlign: "center" }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: CLAY,
+                    }}
+                  >
+                    {uploadError}
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
