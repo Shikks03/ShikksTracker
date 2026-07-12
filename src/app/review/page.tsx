@@ -85,6 +85,11 @@ export default function ReviewPage() {
   const [editSubject, setEditSubject] = useState("");
   const [editBody,    setEditBody]    = useState("");
 
+  // Regenerate mode
+  const [regenMode,      setRegenMode]      = useState(false);
+  const [regenFeedback,  setRegenFeedback]  = useState("");
+  const [regenLoading,   setRegenLoading]   = useState(false);
+
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async () => {
@@ -134,6 +139,8 @@ export default function ReviewPage() {
     });
     if (error) { setGlobalError(`Approve failed: ${error}`); return; }
     setEditMode(false);
+    setRegenMode(false);
+    setRegenFeedback("");
     // Advance index (clamp handled by effect after loadAll updates drafts)
     setCurrentIdx((idx) => Math.max(0, Math.min(idx, drafts.length - 2)));
     await loadAll();
@@ -156,7 +163,26 @@ export default function ReviewPage() {
     });
     if (error) { setGlobalError(`Discard failed: ${error}`); return; }
     setEditMode(false);
+    setRegenMode(false);
+    setRegenFeedback("");
     setCurrentIdx((idx) => Math.max(0, Math.min(idx, drafts.length - 2)));
+    await loadAll();
+  }
+
+  async function handleRegenerate(id: string) {
+    setRegenLoading(true);
+    setGlobalError(null);
+    const { error } = await apiFetch(`/api/email-logs/${id}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ feedback: regenFeedback.trim() || undefined }),
+    });
+    setRegenLoading(false);
+    if (error) {
+      setGlobalError(`Regenerate failed: ${error}`);
+      return;
+    }
+    setRegenMode(false);
+    setRegenFeedback("");
     await loadAll();
   }
 
@@ -305,9 +331,15 @@ export default function ReviewPage() {
         setEditSubject(cur.subject);
         setEditBody(cur.body);
         setEditMode(true);
+        setRegenMode(false);
+        setRegenFeedback("");
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
-        if (ds.length > 0) setCurrentIdx((ds.length + idx + 1) % ds.length);
+        if (ds.length > 0) {
+          setCurrentIdx((ds.length + idx + 1) % ds.length);
+          setRegenMode(false);
+          setRegenFeedback("");
+        }
       }
     }
 
@@ -655,12 +687,10 @@ export default function ReviewPage() {
                     padding: "20px 28px",
                     borderTop: "1px solid #E4DBC8",
                     backgroundColor: "#F1EBDD",
-                    display: "flex",
-                    gap: 14,
                   }}
                 >
                   {editMode ? (
-                    <>
+                    <div style={{ display: "flex", gap: 14 }}>
                       <Button
                         variant="primary"
                         style={{ flex: 1 }}
@@ -674,9 +704,60 @@ export default function ReviewPage() {
                       >
                         Cancel
                       </Button>
-                    </>
+                    </div>
+                  ) : regenMode ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <input
+                        autoFocus
+                        placeholder="Optional: what should change? (e.g. 'too formal', 'mention our free trial')"
+                        value={regenFeedback}
+                        onChange={(e) => setRegenFeedback(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleRegenerate(currentDraft._id);
+                          } else if (e.key === "Escape") {
+                            setRegenMode(false);
+                            setRegenFeedback("");
+                          }
+                        }}
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 12,
+                          color: INK,
+                          background: "#FDFAF2",
+                          border: "1px solid #C9BEA6",
+                          borderRadius: 6,
+                          outline: "none",
+                          width: "100%",
+                          padding: "10px 14px",
+                          boxSizing: "border-box",
+                          letterSpacing: "0.02em",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <Button
+                          variant="primary"
+                          style={{ flex: 1 }}
+                          disabled={regenLoading}
+                          onClick={() => handleRegenerate(currentDraft._id)}
+                        >
+                          {regenLoading ? "Regenerating…" : "Regenerate"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={regenLoading}
+                          onClick={() => {
+                            setRegenMode(false);
+                            setRegenFeedback("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
-                    <>
+                    <div style={{ display: "flex", gap: 14 }}>
                       <Button
                         variant="primary"
                         style={{ flex: 1 }}
@@ -696,18 +777,27 @@ export default function ReviewPage() {
                         Edit
                       </Button>
                       <Button
+                        variant="outline"
+                        onClick={() => {
+                          setRegenMode(true);
+                          setRegenFeedback("");
+                        }}
+                      >
+                        Regenerate
+                      </Button>
+                      <Button
                         variant="danger-outline"
                         onClick={() => handleDiscard(currentDraft._id)}
                       >
                         Discard
                       </Button>
-                    </>
+                    </div>
                   )}
                 </div>
               </Panel>
 
               {/* Keyboard hint */}
-              {!editMode && (
+              {!editMode && !regenMode && (
                 <div style={{ textAlign: "center", marginTop: 16 }}>
                   <span
                     style={{
@@ -763,6 +853,8 @@ export default function ReviewPage() {
                   onClick={() => {
                     setCurrentIdx(actualIdx);
                     setEditMode(false);
+                    setRegenMode(false);
+                    setRegenFeedback("");
                   }}
                 >
                   <div

@@ -17,6 +17,17 @@ export interface DraftInput {
   stage: 1 | 2 | 3;
   /** Earlier email touches, used for follow-up continuity */
   previousEmails?: { subject: string; body: string }[];
+  /**
+   * The draft that was rejected by the reviewer. When present (alongside
+   * `feedback`), `buildUserMessage` appends a clearly-delimited rejection
+   * section so Claude does not repeat the same content.
+   */
+  previousAttempt?: { subject: string; body: string };
+  /**
+   * Optional human feedback explaining why the previous draft was rejected.
+   * Only used when `previousAttempt` is also provided.
+   */
+  feedback?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +70,7 @@ RULES — follow every one, no exceptions:
 
 Use the email_draft tool to return your result.`;
 
-function buildUserMessage(input: DraftInput): string {
+export function buildUserMessage(input: DraftInput): string {
   const lines: string[] = [
     `Business name: ${input.businessName}`,
     `Contact name: ${input.contactName ?? "(not provided)"}`,
@@ -80,6 +91,22 @@ function buildUserMessage(input: DraftInput): string {
       lines.push(`Subject: ${prev.subject}`);
       lines.push(`Body:\n${prev.body}`);
     }
+  }
+
+  if (input.previousAttempt) {
+    lines.push(
+      "\n--- REJECTED DRAFT (do NOT repeat this) ---",
+      `The previous draft attempt was REJECTED.`,
+      `Rejected subject: ${input.previousAttempt.subject}`,
+      `Rejected body:\n${input.previousAttempt.body}`,
+    );
+    if (input.feedback) {
+      lines.push(`Reason for rejection: ${input.feedback}`);
+    }
+    lines.push(
+      `Write a NEW draft addressing ${input.feedback ? "the feedback above" : "the reviewer's concerns"} — do not repeat the rejected version.`,
+      "--- END REJECTED DRAFT ---",
+    );
   }
 
   return lines.join("\n");
