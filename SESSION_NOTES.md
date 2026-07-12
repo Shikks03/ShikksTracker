@@ -120,6 +120,34 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   until then — this is the fail-closed design, not a bug), then walk the CLAUDE.md
   secrets checklist at deploy time. GAPS #1 marked resolved; Phases 2+ of the plan
   (tests, correctness/compliance) remain.
+- **2026-07-13** — **Remediation Phase 6 (product improvements) implemented** on branch
+  `remediation-phase-6`, merged to `main`. Workflow: Sonnet implementer subagents (one
+  per task, fresh context), Opus manager reviewing each diff + independently running the
+  verification trio, atomic commit per task. All SIX tasks landed (commits
+  76e7b2e/4b7e3a5/d2730ed/d80e5f6/bcf172a/42c9113): **6.5** next-action layer
+  (Contact.nextActionAt/nextActionNote + sparse index; engine step D emails a
+  once-per-Manila-day digest of overdue actions via a new CronRun.actionDigestSentAt
+  marker; RunSummary gains actionRemindersDue/actionDigestSent; dashboard OVERDUE/DUE-TODAY
+  chips; contact-detail Save/Clear inputs). **6.2** one-click unsubscribe (Contact.
+  unsubscribeToken UUID; public GET /api/unsubscribe/[token] → shared suppressContact,
+  neutral page, no token-validity leak; appended at send time after placeholder subst,
+  excluded from click-tracking via isUnsubscribeUrl; proxy allowlist; reply-STOP kept).
+  **6.1** draft regeneration (buildUserMessage exported + optional feedback/previousAttempt;
+  POST /api/email-logs/[id]/regenerate, draft-only, mirrors generateDrafts context,
+  ANTHROPIC_API_KEY→400; review-queue Regenerate button w/ inline feedback). **6.6** compose
+  templates (Template model + validated CRUD, no raw create(body); /compose dropdown +
+  save-as-template). **6.3** dashboard polish (approved-awaiting count in kicker;
+  non-active status chips in IN SEQUENCE; replied contacts greyed/non-selectable in
+  Compose). **6.4** import preview (client-side papaparse dry-run on /import reusing the
+  server parseContactsCsv + isValidEmail — extracted pure email helpers to src/lib/email.ts,
+  contacts.ts re-exports for back-compat; FormData upload + server route unchanged).
+  Tests 221 → 303 (all green); tsc clean throughout. **Build caveat:** the final
+  `npm run build` could not be re-confirmed green at merge time due to a transient
+  fonts.gstatic.com CDN outage (next/font/google downloads fonts at build) — NOT a code
+  issue: identical builds passed earlier this same session and 6.x touches no font/layout
+  code. Re-run `npm run build` once network is restored to reconfirm. **The remediation
+  plan (Phases 0–6) is now fully code-complete.** Remaining is user-side go-live only
+  (Vercel deploy + pinger; Anthropic key is now connected) and live/visual QA.
 - **2026-07-11** — **Remediation Phase 5 (maintainability) implemented** on branch
   `remediation-phase-5` (3 commits, Opus direct — the changes are mechanical dedup + docs
   where the 221-test harness + tsc + build are the regression net; visual QA still blocked

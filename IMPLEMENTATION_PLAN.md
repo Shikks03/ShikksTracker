@@ -325,7 +325,14 @@ committed, no client-side env exposure. Remaining work splits cleanly:
   (verify with the Phase 2 tests — the `filter`/empty-paragraph edge behaviors differ
   slightly; pin with a test first).
 
-## Phase 6 — Product improvements (independent; post-go-live OK)
+## Phase 6 — Product improvements (independent; post-go-live OK) — ✅ DONE 2026-07-13 (branch `remediation-phase-6`, merged to main)
+
+> All six tasks landed via Sonnet implementer subagents with per-task Opus review + trio
+> verification (commits 76e7b2e/4b7e3a5/d2730ed/d80e5f6/bcf172a/42c9113). 6.1 draft
+> regeneration, 6.2 unsubscribe link, 6.3 dashboard polish, 6.4 import preview, 6.5
+> next-action layer, 6.6 compose templates. Tests 221→303. Build's final reconfirm was
+> blocked by a transient Google-Fonts CDN outage (environmental, not code) — tsc + 303
+> tests green. **The remediation plan is fully code-complete.**
 
 ### Task 6.1 — Draft regeneration with feedback (G-5)
 - Review queue: "Regenerate" button → `POST /api/email-logs/[id]/regenerate` with
