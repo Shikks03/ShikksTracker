@@ -12,3 +12,6 @@ export type { IEmailLog, IEmailLogLink } from "./EmailLog";
 
 export { default as Suppression } from "./Suppression";
 export type { ISuppression } from "./Suppression";
+
+export { default as Template } from "./Template";
+export type { ITemplate } from "./Template";

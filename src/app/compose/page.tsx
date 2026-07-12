@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button, MonoLabel, Panel } from "@/components/ui";
 import {
@@ -27,6 +27,13 @@ interface BatchResult {
   skipped: { businessName: string; reason: string }[];
 }
 
+interface TemplateItem {
+  _id: string;
+  name: string;
+  subject: string;
+  body: string;
+}
+
 export default function ComposePage() {
   const router = useRouter();
 
@@ -41,13 +48,25 @@ export default function ComposePage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [result,      setResult]      = useState<BatchResult | null>(null);
 
-  // Load campaigns once
+  // Templates
+  const [templates,   setTemplates]   = useState<TemplateItem[]>([]);
+  const [templateId,  setTemplateId]  = useState("");
+  const [savingTpl,   setSavingTpl]   = useState(false);
+
+  const loadTemplates = useCallback(() => {
+    apiFetch<TemplateItem[]>("/api/templates").then(({ data }) => {
+      if (Array.isArray(data)) setTemplates(data);
+    });
+  }, []);
+
+  // Load campaigns + templates once
   useEffect(() => {
     apiFetch<CampaignItem[]>("/api/campaigns").then(({ data, error }) => {
       if (Array.isArray(data)) setCampaigns(data);
       else if (error) setApiError(`Couldn't load campaigns — ${error}`);
     });
-  }, []);
+    loadTemplates();
+  }, [loadTemplates]);
 
   function handleCampaignChange(id: string) {
     setCampaignId(id);
@@ -84,6 +103,44 @@ export default function ComposePage() {
   function toggleAll() {
     if (allChecked) setCheckedIds(new Set());
     else setCheckedIds(new Set(contacts.map((c) => c._id)));
+  }
+
+  function handleTemplateSelect(id: string) {
+    setTemplateId(id);
+    if (!id) return;
+    const tpl = templates.find((t) => t._id === id);
+    if (tpl) {
+      setSubject(tpl.subject);
+      setBody(tpl.body);
+      // Clear any lingering field errors on those fields
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.subject;
+        delete next.body;
+        return next;
+      });
+    }
+  }
+
+  async function handleSaveAsTemplate() {
+    const tplName = window.prompt("Template name:");
+    if (!tplName || !tplName.trim()) return;
+    setSavingTpl(true);
+    setApiError(null);
+    const { error } = await apiFetch("/api/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        name:    tplName.trim(),
+        subject: subject.trim(),
+        body:    body.trim(),
+      }),
+    });
+    setSavingTpl(false);
+    if (error) {
+      setApiError(`Couldn't save template — ${error}`);
+    } else {
+      loadTemplates();
+    }
   }
 
   function validate(): boolean {
@@ -278,6 +335,33 @@ export default function ComposePage() {
               </div>
             )}
 
+            {/* Template picker */}
+            <div style={{ marginBottom: 22 }}>
+              <label style={labelStyle}>Template</label>
+              <select
+                value={templateId}
+                onChange={(e) => handleTemplateSelect(e.target.value)}
+                style={{
+                  fontFamily: grotesk,
+                  fontSize: 15,
+                  color: templateId ? INK : FAINT,
+                  backgroundColor: "#F8F5EC",
+                  border: "1px solid #C9BEA6",
+                  borderRadius: 6,
+                  padding: "10px 14px",
+                  width: "100%",
+                  outline: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">— Template —</option>
+                {templates.map((t) => (
+                  <option key={t._id} value={t._id}>{t.name}</option>
+                ))}
+              </select>
+              <span style={noteStyle}>SELECTING A TEMPLATE PRE-FILLS SUBJECT + BODY (BOTH REMAIN EDITABLE)</span>
+            </div>
+
             {/* Subject */}
             <div style={{ marginBottom: 22 }}>
               <label style={labelStyle}>Subject</label>
@@ -329,6 +413,28 @@ export default function ComposePage() {
               />
               {fieldErrors.body && <span style={fieldErrorStyle}>{fieldErrors.body}</span>}
               <span style={noteStyle}>{"TOKENS: {{businessName}} · {{contactName}}"}</span>
+
+              {/* Save as template */}
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={handleSaveAsTemplate}
+                  disabled={savingTpl || !subject.trim() || !body.trim()}
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 10.5,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: (!subject.trim() || !body.trim() || savingTpl) ? FAINT2 : FOREST,
+                    background: "none",
+                    border: "none",
+                    cursor: (!subject.trim() || !body.trim() || savingTpl) ? "not-allowed" : "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {savingTpl ? "Saving…" : "Save as template"}
+                </button>
+              </div>
             </div>
 
             <Button
