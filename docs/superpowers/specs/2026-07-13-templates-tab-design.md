@@ -82,6 +82,11 @@ Add `generateTemplateDraft({ brief, tone })`:
   env var (`ANTHROPIC_MODEL`, default `claude-sonnet-4-6`); same empty-field guards.
 - A shared `buildTemplateUserMessage({ brief, tone })` builds the user turn (brief + tone
   lines), kept as a pure, unit-testable function like `buildUserMessage`.
+- **The template system prompt is an intentional first-pass.** The user will hand-tune it
+  later, so implement it as a clearly-isolated, well-commented constant that is easy to
+  find and edit — do not over-engineer it. Keep tests asserting *behavioral intent*
+  (placeholders preserved) rather than exact prompt wording, so prompt edits don't break
+  the suite.
 
 ### 3.3 Templates page — `src/app/templates/page.tsx` (`"use client"`)
 
