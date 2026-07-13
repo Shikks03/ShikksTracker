@@ -65,8 +65,7 @@ RULES — follow every one, no exceptions:
    - Stage 1 (initial): pitch the offer clearly using offerSummary.
    - Stage 2–3 (follow-ups): shorter than the initial email. Reference the previous email(s) briefly. Add one new angle or gentle nudge. NEVER guilt-trip.
    - Stage 2–3 subjects: must read as a natural thread continuation (e.g. "Re: Quick question for [Business]" or similar).
-8. Always end with a one-line opt-out note on its own line, e.g. "If you'd rather not hear from me, just reply STOP."
-9. Warm and direct tone. English is fine; keep it natural for a Philippine business audience.
+8. Warm and direct tone. English is fine; keep it natural for a Philippine business audience.
 
 Use the email_draft tool to return your result.`;
 
@@ -184,3 +183,112 @@ export async function generateEmailDraft(
 // Call `renderTrackedHtml(body, [], null)` for the untracked HTML representation
 // that this module previously exposed as `bodyToHtml` (removed 2026-07-11,
 // Task 5.4 — the two implementations were duplicated and would drift).
+
+// ---------------------------------------------------------------------------
+// Template generation (reusable boilerplate — placeholders PRESERVED)
+//
+// Distinct from generateEmailDraft above: that produces a finished, per-contact
+// email and FORBIDS placeholders. This produces a reusable TEMPLATE and REQUIRES
+// {{businessName}} / {{contactName}} tokens so it can be reused across contacts.
+//
+// NOTE: TEMPLATE_SYSTEM_PROMPT is an intentional first-pass — expected to be
+// hand-tuned by the user. Keep it isolated and easy to edit.
+// ---------------------------------------------------------------------------
+
+export interface TemplateDraftInput {
+  /** Short free-text description of the template's purpose/offer. */
+  brief: string;
+  /** Optional tone/voice notes (mirrors Campaign.toneNotes shape). */
+  tone?: string;
+}
+
+/** System prompt for reusable-template generation. First-pass; user will tune. */
+export const TEMPLATE_SYSTEM_PROMPT = `You are a cold outreach specialist writing REUSABLE email TEMPLATES for Philippine small businesses. Your output will be saved once and reused across many different businesses, so it must be written with placeholder tokens rather than any specific business or person.
+
+RULES — follow every one, no exceptions:
+1. Under ~120 words. Plain text only. Paragraphs separated by a blank line. No HTML, no markdown, no bullet lists.
+2. This is a TEMPLATE, not a finished email. Where the recipient's business name belongs, write the exact token {{businessName}}. Where a first name belongs, write the exact token {{contactName}}. Write these tokens EXACTLY, with double curly braces — never real names, never square-bracket placeholders like [Name].
+3. Use {{contactName}} sparingly and only where it reads naturally (at send time a friendly fallback is substituted when a contact has no name). {{businessName}} may appear once or twice where natural.
+4. Open with something that will feel specific once {{businessName}} is filled in. NEVER open with "I hope this email finds you well" or any generic opener.
+5. Respect the tone notes. If they say formal, be formal; if casual, be casual.
+6. No spammy phrasing: no ALL CAPS words, no "limited time offer", at most one "!" in the whole email.
+7. Warm and direct tone, natural for a Philippine small-business audience.
+
+Use the email_draft tool to return your result.`;
+
+/** Builds the user-turn message for template generation. Pure + testable. */
+export function buildTemplateUserMessage(input: TemplateDraftInput): string {
+  const tone =
+    input.tone && input.tone.trim()
+      ? input.tone
+      : "(none — default to professional and warm)";
+  return [`Brief: ${input.brief}`, `Tone notes: ${tone}`].join("\n");
+}
+
+/**
+ * Generates a reusable email TEMPLATE (subject + body with placeholders) using
+ * Claude via forced tool use. Structured output is guaranteed. Does not persist.
+ */
+export async function generateTemplateDraft(
+  input: TemplateDraftInput
+): Promise<{ subject: string; body: string }> {
+  const client = getClient();
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: TEMPLATE_SYSTEM_PROMPT,
+    tools: [
+      {
+        name: "email_draft",
+        description:
+          "Return the generated reusable email template as structured JSON with subject and body fields.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            subject: {
+              type: "string",
+              description:
+                "The template subject line. May contain {{businessName}} / {{contactName}} tokens.",
+            },
+            body: {
+              type: "string",
+              description:
+                "The plain-text template body with {{businessName}} / {{contactName}} tokens. Paragraphs separated by blank lines (\\n\\n). No HTML or markdown.",
+            },
+          },
+          required: ["subject", "body"],
+          additionalProperties: false,
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "email_draft" },
+    messages: [{ role: "user", content: buildTemplateUserMessage(input) }],
+  });
+
+  const toolBlock = response.content.find((b) => b.type === "tool_use");
+  if (!toolBlock || toolBlock.type !== "tool_use") {
+    throw new Error(
+      `generateTemplateDraft: expected a tool_use block from Claude but received: ${JSON.stringify(response.content)}`
+    );
+  }
+
+  const input_data = toolBlock.input as Record<string, unknown>;
+  const subject =
+    typeof input_data.subject === "string" ? input_data.subject.trim() : "";
+  const body =
+    typeof input_data.body === "string" ? input_data.body.trim() : "";
+
+  if (!subject) {
+    throw new Error(
+      "generateTemplateDraft: Claude returned an empty subject. Check the prompt or model output."
+    );
+  }
+  if (!body) {
+    throw new Error(
+      "generateTemplateDraft: Claude returned an empty body. Check the prompt or model output."
+    );
+  }
+
+  return { subject, body };
+}
