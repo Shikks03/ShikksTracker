@@ -27,10 +27,6 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "ShikksTracker",
   description: "Email outreach automation dashboard",
-  icons: {
-    icon: "/logo-square.png",
-    apple: "/logo-square.png",
-  },
 };
 
 export default function RootLayout({

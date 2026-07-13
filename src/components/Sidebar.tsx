@@ -61,12 +61,29 @@ export default function Sidebar() {
     >
       {/* ── Wordmark ─────────────────────────────────── */}
       <div>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/logo-horizontal.png"
-          alt="ShikksTracker"
-          style={{ width: 158, height: "auto", display: "block" }}
-        />
+        <div
+          style={{
+            fontFamily: serif,
+            fontStyle: "italic",
+            fontSize: 28,
+            color: "#F4EEDF",
+            lineHeight: 1.15,
+          }}
+        >
+          Shikks
+        </div>
+        <div
+          style={{
+            fontFamily: mono,
+            fontSize: 10.5,
+            letterSpacing: "0.28em",
+            color: "#8B8371",
+            textTransform: "uppercase",
+            marginTop: 7,
+          }}
+        >
+          TRACKER · OUTREACH OS
+        </div>
         {/* divider */}
         <div
           style={{
