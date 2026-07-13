@@ -5,6 +5,7 @@ export interface ITemplate extends Document {
   subject: string;
   body: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 const TemplateSchema = new Schema<ITemplate>(
@@ -13,7 +14,7 @@ const TemplateSchema = new Schema<ITemplate>(
     subject: { type: String, required: true, trim: true },
     body:    { type: String, required: true, trim: true },
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: { createdAt: true, updatedAt: true } }
 );
 
 // Index by name for faster lookups; not unique (allow same name across revisions)
