@@ -306,6 +306,12 @@ export async function checkReplies(): Promise<RepliesResult> {
 
       result.checked++;
 
+      // Multi-channel guard: reply detection is email-only (non-email contacts
+      // never have a Gmail thread, so they were already skipped above). Capture a
+      // narrowed local so contactEmail is typed `string` for the rest of the loop.
+      const contactEmail = contact.contactEmail;
+      if (!contactEmail) continue;
+
       // Fetch the Gmail thread (metadata only — we only need From headers here)
       let threadData;
       try {
@@ -327,7 +333,7 @@ export async function checkReplies(): Promise<RepliesResult> {
 
       const messages = threadData.messages ?? [];
       const sentAtMs = lastSentLog.sentAt ? lastSentLog.sentAt.getTime() : 0;
-      const contactEmailLower = contact.contactEmail.toLowerCase();
+      const contactEmailLower = contactEmail.toLowerCase();
 
       // -----------------------------------------------------------------------
       // Bounce pre-pass (poll-time bounce detection)
@@ -378,7 +384,7 @@ export async function checkReplies(): Promise<RepliesResult> {
               "")
             : bounceCandidate.snippet ?? "";
 
-          if (!isBounceMessage(fromHeader, bounceBody, contact.contactEmail)) {
+          if (!isBounceMessage(fromHeader, bounceBody, contactEmail)) {
             continue;
           }
 
@@ -390,7 +396,7 @@ export async function checkReplies(): Promise<RepliesResult> {
 
           // Queue a takeover-style alert so the user knows about the bounce
           const escapedName = htmlEscape(contact.businessName);
-          const escapedEmail = htmlEscape(contact.contactEmail);
+          const escapedEmail = htmlEscape(contactEmail);
           const bounceBaseUrl = process.env.APP_BASE_URL;
           const bounceDashboardLink = bounceBaseUrl
             ? `\n            <p><a href="${encodeURI(`${bounceBaseUrl}/contacts/${contact._id}`)}">Open contact in dashboard</a></p>`
@@ -513,7 +519,7 @@ export async function checkReplies(): Promise<RepliesResult> {
         //    corrupt state above, and so the user can audit for matcher misfires.
         //    Subject uses "Opt-out from" to distinguish from normal-reply alerts.
         const escapedName = htmlEscape(contact.businessName);
-        const escapedEmail = htmlEscape(contact.contactEmail);
+        const escapedEmail = htmlEscape(contactEmail);
         const escapedSnippet = optOutClean ? htmlEscape(makeSnippet(optOutClean) ?? "") : "";
         const optOutBaseUrl = process.env.APP_BASE_URL;
         const optOutDashboardLink = optOutBaseUrl
@@ -564,7 +570,7 @@ export async function checkReplies(): Promise<RepliesResult> {
         // 5. Queue takeover alert for normal reply — sent last so alert failure
         //    cannot corrupt state above.
         const escapedName = htmlEscape(contact.businessName);
-        const escapedEmail = htmlEscape(contact.contactEmail);
+        const escapedEmail = htmlEscape(contactEmail);
         const escapedSnippet = replyClean ? htmlEscape(makeSnippet(replyClean) ?? "") : "";
         const replyBaseUrl = process.env.APP_BASE_URL;
         const replyDashboardLink = replyBaseUrl

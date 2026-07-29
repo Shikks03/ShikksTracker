@@ -16,6 +16,7 @@ export interface IEmailLog extends Document {
    * to prevent duplicate sends if two runners race or if the process dies.
    */
   status: "draft" | "approved" | "sending" | "sent";
+  channel: "email" | "facebook" | "instagram" | "phone";
   subject: string;
   body: string;
   gmailThreadId: string | null;
@@ -41,6 +42,8 @@ export interface IEmailLog extends Document {
   sendErrorCount: number;
   /** Error message from the most recent failed send attempt. */
   lastSendError: string | null;
+  /** Set when a non-email (facebook/instagram/phone) log is manually marked sent from the dashboard, since there is no Gmail send event to timestamp it. */
+  sentManuallyAt: Date | null;
   /** Set by Mongoose `timestamps` on insert. Enables draft-age display and reliable ordering (previously ordering relied on _id). */
   createdAt: Date;
 }
@@ -62,7 +65,17 @@ const EmailLogSchema = new Schema<IEmailLog>({
     enum: ["draft", "approved", "sending", "sent"],
     default: "draft",
   },
-  subject: { type: String, required: true },
+  channel: {
+    type: String,
+    enum: ["email", "facebook", "instagram", "phone"],
+    default: "email",
+  },
+  subject: {
+    type: String,
+    required: function (this: IEmailLog) {
+      return this.channel === "email";
+    },
+  },
   body: { type: String, required: true },
   gmailThreadId: { type: String, default: null },
   gmailMessageId: { type: String, default: null },
@@ -81,6 +94,7 @@ const EmailLogSchema = new Schema<IEmailLog>({
   sendAttemptedAt: { type: Date, default: null },
   sendErrorCount: { type: Number, default: 0 },
   lastSendError: { type: String, default: null },
+  sentManuallyAt: { type: Date, default: null },
 }, {
   // createdAt only — matches Contact/Campaign convention. Existing docs simply
   // lack the field (fine). No updatedAt: EmailLog mutates constantly (tracking

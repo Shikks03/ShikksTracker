@@ -458,6 +458,21 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       };
     }
 
+    // Multi-channel guard: sendOneLog delivers via Gmail (email channel only).
+    // A non-email log — or a contact with no email — must never reach Gmail; the
+    // manual "Outreach Tasks" flow handles social/phone sends. Capture a narrowed
+    // local so contactEmail is typed `string` for the Gmail call below.
+    const contactEmail = contact.contactEmail;
+    if (log.channel !== "email" || !contactEmail) {
+      await EmailLog.findByIdAndUpdate(log._id, { status: "draft", sendAttemptedAt: null });
+      return {
+        status: "skipped",
+        contactName: contact.businessName,
+        subject: log.subject,
+        error: "non-email channel — not sendable via Gmail; reverted to draft",
+      };
+    }
+
     // Suppression check — after contact load, before Gmail/Claude work.
     // A contact may have been manually added to the suppression list after their
     // logs were approved; we must honour this before sending (SPEC §14, PH DPA).
@@ -573,7 +588,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     let returnedThreadId: string;
     try {
       const sendResult = await sendGmailMessage({
-        to: contact.contactEmail,
+        to: contactEmail,
         subject: subjectToSend,
         htmlBody,
         threadId,

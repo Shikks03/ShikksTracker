@@ -3,12 +3,20 @@ import { randomUUID } from "crypto";
 
 export interface IContact extends Document {
   businessName: string;
-  contactEmail: string;
+  contactEmail?: string;
   contactName?: string;
   keyPoints: string;
   importMethod: "csv" | "manual";
   leadSource: "cold_email" | "referral" | "event_connection" | "other";
   campaignId: Types.ObjectId;
+  outreachChannel: "email" | "facebook" | "instagram" | "phone";
+  phone?: string;
+  facebook?: string;
+  instagram?: string;
+  website?: string;
+  sourcePlaceId?: string;
+  webPresenceTier?: string;
+  claimed?: string;
   status: "active" | "paused" | "replied" | "bounced" | "unsubscribed";
   /** 0=not started, 1=initial sent, 2=followup1 sent, 3=followup2 sent */
   currentStage: number;
@@ -39,7 +47,14 @@ export interface IContact extends Document {
 const ContactSchema = new Schema<IContact>(
   {
     businessName: { type: String, required: true },
-    contactEmail: { type: String, required: true, lowercase: true, trim: true },
+    contactEmail: {
+      type: String,
+      required: function (this: IContact) {
+        return this.outreachChannel === "email";
+      },
+      lowercase: true,
+      trim: true,
+    },
     contactName: { type: String },
     keyPoints: { type: String, required: true },
     importMethod: { type: String, enum: ["csv", "manual"], required: true },
@@ -49,6 +64,18 @@ const ContactSchema = new Schema<IContact>(
       required: true,
     },
     campaignId: { type: Schema.Types.ObjectId, ref: "Campaign", required: true },
+    outreachChannel: {
+      type: String,
+      enum: ["email", "facebook", "instagram", "phone"],
+      default: "email",
+    },
+    phone: { type: String, trim: true },
+    facebook: { type: String, trim: true },
+    instagram: { type: String, trim: true },
+    website: { type: String, trim: true },
+    sourcePlaceId: { type: String },
+    webPresenceTier: { type: String },
+    claimed: { type: String },
     status: {
       type: String,
       enum: ["active", "paused", "replied", "bounced", "unsubscribed"],
@@ -87,8 +114,15 @@ const ContactSchema = new Schema<IContact>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
+// Index change (multi-channel): partial unique so email-less contacts don't collide;
+// sourcePlaceId dedupe for scraped imports. Live DB needs syncIndexes()/manual drop — see SESSION_NOTES.
 // Dedupe within a campaign
-ContactSchema.index({ contactEmail: 1, campaignId: 1 }, { unique: true });
+ContactSchema.index(
+  { contactEmail: 1, campaignId: 1 },
+  { unique: true, partialFilterExpression: { contactEmail: { $type: "string" } } }
+);
+// Dedupe scraped contacts within a campaign by source place id
+ContactSchema.index({ sourcePlaceId: 1, campaignId: 1 }, { unique: true, sparse: true });
 // Sequence-engine query
 ContactSchema.index({ status: 1, nextSendAt: 1 });
 // Next-action reminder query — sparse so null entries are not indexed
