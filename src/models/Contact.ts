@@ -121,8 +121,16 @@ ContactSchema.index(
   { contactEmail: 1, campaignId: 1 },
   { unique: true, partialFilterExpression: { contactEmail: { $type: "string" } } }
 );
-// Dedupe scraped contacts within a campaign by source place id
-ContactSchema.index({ sourcePlaceId: 1, campaignId: 1 }, { unique: true, sparse: true });
+// Dedupe scraped contacts within a campaign by source place id.
+// MUST be partial, not sparse: a *compound* sparse index still indexes a document
+// as long as it has at least one of the keys — and campaignId is always present.
+// With `sparse: true` every email contact would be indexed as
+// { sourcePlaceId: null, campaignId: X }, so the second email contact in a campaign
+// would fail with a duplicate-key error. The partial filter excludes them properly.
+ContactSchema.index(
+  { sourcePlaceId: 1, campaignId: 1 },
+  { unique: true, partialFilterExpression: { sourcePlaceId: { $type: "string" } } }
+);
 // Sequence-engine query
 ContactSchema.index({ status: 1, nextSendAt: 1 });
 // Next-action reminder query — sparse so null entries are not indexed
