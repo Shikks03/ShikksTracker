@@ -15,10 +15,18 @@ export async function GET(request: NextRequest) {
     const contactId = searchParams.get("contactId");
     const campaignId = searchParams.get("campaignId");
     const status = searchParams.get("status");
+    const channel = searchParams.get("channel");
 
     if (contactId) filter.contactId = contactId;
     if (campaignId) filter.campaignId = campaignId;
     if (status) filter.status = status;
+    // Additive, optional filter (Phase 4 multi-channel): the email review
+    // queue (/review) now passes channel=email so social/phone drafts don't
+    // leak into the email-only review UI. Deliberately NOT defaulted to
+    // "email" here — the contact-detail page calls this same endpoint with
+    // only `contactId` and must keep showing that contact's full history
+    // across every channel.
+    if (channel) filter.channel = channel;
 
     const logs = await EmailLog.find(filter).lean();
     return NextResponse.json(logs);

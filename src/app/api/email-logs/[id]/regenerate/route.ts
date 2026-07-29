@@ -114,6 +114,12 @@ export async function POST(
         previousEmails: previousEmails.length ? previousEmails : undefined,
         previousAttempt: { subject: log.subject, body: log.body },
         feedback,
+        // Without this, a facebook/instagram/phone draft would silently
+        // regenerate through the EMAIL system prompt (complete with a
+        // subject line) — generateEmailDraft defaults to "email" when
+        // channel is omitted. log.channel is always set (schema default
+        // "email"), so this is safe for legacy logs too.
+        channel: log.channel,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -123,7 +129,12 @@ export async function POST(
       throw err;
     }
 
-    // Update the log's subject/body in place — status stays "draft"
+    // Update the log's subject/body in place — status stays "draft".
+    // For a non-email log, newDraft.subject is "" (generateEmailDraft never
+    // returns a subject for facebook/instagram/phone — see draft.ts). That's
+    // safe to write here: log.channel is not changing, EmailLogSchema only
+    // *requires* subject when channel === "email" (a non-email log's subject
+    // was already ""), so this never blanks out a real subject line.
     const updated = await EmailLog.findByIdAndUpdate(
       id,
       { subject: newDraft.subject, body: newDraft.body },

@@ -29,6 +29,7 @@ import { checkReplies } from "@/lib/replies";
 import { applyPlaceholders } from "@/lib/compose";
 import { suppressContact } from "@/lib/contacts";
 import { envInt } from "@/lib/env";
+import { isNonEmailChannel } from "@/lib/outreachLogs";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -547,8 +548,17 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
     // A non-email log — or a contact with no email — must never reach Gmail; the
     // manual "Outreach Tasks" flow handles social/phone sends. Capture a narrowed
     // local so contactEmail is typed `string` for the Gmail call below.
+    //
+    // Uses isNonEmailChannel rather than `log.channel !== "email"` so that a
+    // legacy log predating the `channel` field (channel absent/null) counts as
+    // EMAIL — the same convention EMAIL_CHANNEL_QUERY uses to select logs.
+    // The two must agree: sendApproved selects legacy channel-less logs, so a
+    // `!== "email"` test here would refuse to send them and bounce them back to
+    // draft forever. Hydrated Mongoose docs currently mask this (the schema
+    // default fills `channel` on read), but a `.lean()` log would not — so the
+    // guard is written to be correct either way rather than relying on that.
     const contactEmail = contact.contactEmail;
-    if (log.channel !== "email" || !contactEmail) {
+    if (isNonEmailChannel(log.channel) || !contactEmail) {
       await EmailLog.findByIdAndUpdate(log._id, { status: "draft", sendAttemptedAt: null });
       return {
         status: "skipped",

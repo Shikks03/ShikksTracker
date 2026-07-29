@@ -15,7 +15,14 @@ import {
   serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
   FOREST_WON as FOREST,
 } from "@/components/tokens";
+import { ChannelBadge, TierBadge, ClaimedBadge } from "@/components/ChannelBadges";
 import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
+import {
+  normalizeHandleUrl,
+  normalizeWebsiteUrl,
+  telHref,
+  type Channel,
+} from "@/lib/channels";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +48,20 @@ function fmtDateTime(d: string | null | undefined): string {
     minute: "2-digit",
   });
 }
+
+
+/** Shared pill style for the phone/facebook/instagram/website link chips. */
+const linkChipStyle: React.CSSProperties = {
+  fontFamily: mono,
+  fontSize: 10.5,
+  letterSpacing: "0.02em",
+  color: FAINT2,
+  border: "1px solid #D8CFBB",
+  borderRadius: 5,
+  padding: "3px 10px",
+  textDecoration: "none",
+  display: "inline-block",
+};
 
 // ── Static maps ───────────────────────────────────────────────────────────────
 
@@ -100,6 +121,15 @@ interface Contact {
   campaignId?: string;
   nextActionAt?: string | null;
   nextActionNote?: string | null;
+  // Multi-channel outreach fields (Phase 4) — absent/undefined on ordinary
+  // email contacts, so all rendering below is gated on their presence.
+  outreachChannel?: Channel;
+  phone?: string;
+  facebook?: string;
+  instagram?: string;
+  website?: string;
+  webPresenceTier?: string;
+  claimed?: string;
 }
 
 interface EmailLog {
@@ -463,6 +493,68 @@ export default function ContactDetailPage() {
                 >
                   {metaParts.join(" · ")}
                 </div>
+
+                {/* Line 3: multi-channel fields — only present for contacts scraped
+                    without an email address; ordinary email contacts render nothing
+                    here, so their layout is unchanged. */}
+                {(contact.outreachChannel && contact.outreachChannel !== "email") ||
+                contact.phone ||
+                contact.facebook ||
+                contact.instagram ||
+                contact.website ||
+                contact.webPresenceTier ||
+                contact.claimed ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {contact.outreachChannel && contact.outreachChannel !== "email" && (
+                      <ChannelBadge channel={contact.outreachChannel} />
+                    )}
+                    {contact.phone && (
+                      <a href={`tel:${contact.phone.replace(/\s+/g, "")}`} style={linkChipStyle}>
+                        {contact.phone}
+                      </a>
+                    )}
+                    {contact.facebook && (
+                      <a
+                        href={normalizeHandleUrl(contact.facebook, "facebook")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={linkChipStyle}
+                      >
+                        {contact.facebook}
+                      </a>
+                    )}
+                    {contact.instagram && (
+                      <a
+                        href={normalizeHandleUrl(contact.instagram, "instagram")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={linkChipStyle}
+                      >
+                        {contact.instagram}
+                      </a>
+                    )}
+                    {contact.website && (
+                      <a
+                        href={normalizeWebsiteUrl(contact.website)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={linkChipStyle}
+                      >
+                        {contact.website}
+                      </a>
+                    )}
+                    {contact.webPresenceTier && <TierBadge tier={contact.webPresenceTier} />}
+                    {contact.claimed && <ClaimedBadge claimed={contact.claimed} />}
+                  </div>
+                ) : null}
               </div>
 
               {/* Right: Pause/Resume button or status label */}

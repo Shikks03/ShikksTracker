@@ -8,11 +8,12 @@ import { useNextSendCountdown } from "./useNextSendCountdown";
 const NAV_ITEMS = [
   { index: "01", label: "Dashboard",    href: "/",            showBadge: false },
   { index: "02", label: "Review Queue", href: "/review",      showBadge: true  },
-  { index: "03", label: "Campaigns",    href: "/campaigns",   showBadge: false },
-  { index: "04", label: "Import",       href: "/import",      showBadge: false },
-  { index: "05", label: "Suppressions", href: "/suppressions",showBadge: false },
-  { index: "06", label: "Compose",      href: "/compose",     showBadge: false },
-  { index: "07", label: "Templates",    href: "/templates",   showBadge: false },
+  { index: "03", label: "Outreach",     href: "/outreach",    showBadge: false },
+  { index: "04", label: "Campaigns",    href: "/campaigns",   showBadge: false },
+  { index: "05", label: "Import",       href: "/import",      showBadge: false },
+  { index: "06", label: "Suppressions", href: "/suppressions",showBadge: false },
+  { index: "07", label: "Compose",      href: "/compose",     showBadge: false },
+  { index: "08", label: "Templates",    href: "/templates",   showBadge: false },
 ];
 
 /* ── Typography helpers (inline so no "use client" needed in ui.tsx) ── */

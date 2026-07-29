@@ -96,8 +96,8 @@ export default function ReviewPage() {
     setGlobalError(null);
 
     const [draftRes, approvedRes, contactsRes, campaignsRes] = await Promise.all([
-      apiFetch<EmailLogItem[]>("/api/email-logs?status=draft"),
-      apiFetch<EmailLogItem[]>("/api/email-logs?status=approved"),
+      apiFetch<EmailLogItem[]>("/api/email-logs?status=draft&channel=email"),
+      apiFetch<EmailLogItem[]>("/api/email-logs?status=approved&channel=email"),
       apiFetch<ContactDoc[]>("/api/contacts"),
       apiFetch<Campaign[]>("/api/campaigns"),
     ]);

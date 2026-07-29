@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
-import { getManilaDayStart, sendOneLog } from "@/lib/sequence";
+import { getManilaDayStart, sendOneLog, EMAIL_CHANNEL_QUERY } from "@/lib/sequence";
 import { envInt } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -30,12 +30,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Daily cap check
+    // Daily cap check. DAILY_SEND_CAP is a Gmail deliverability/warm-up
+    // budget — it must count only Gmail-sent (email-channel) logs. Manually
+    // marked-sent facebook/instagram/phone logs cost the sender's Gmail
+    // reputation nothing and must not eat into this budget, or marking a
+    // batch of social touches "sent" would silently block email sending for
+    // the rest of the Manila day. EMAIL_CHANNEL_QUERY matches this fix
+    // already made in sendApproved() (src/lib/sequence.ts) so both stay in
+    // lockstep.
     const now = new Date();
     const dayStart = getManilaDayStart(now);
     const sentToday = await EmailLog.countDocuments({
       status: "sent",
       sentAt: { $gte: dayStart },
+      ...EMAIL_CHANNEL_QUERY,
     });
     const capRemaining = DAILY_SEND_CAP - sentToday;
 
@@ -74,6 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const newSentToday = await EmailLog.countDocuments({
       status: "sent",
       sentAt: { $gte: dayStart },
+      ...EMAIL_CHANNEL_QUERY,
     });
 
     return NextResponse.json({
