@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { Panel, Button, inputClass } from "@/components/ui";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
 import { previewCsv, CsvPreviewResult } from "@/lib/previewCsv";
+import { parseScraperCsv, deriveChannel, NonEmailChannel } from "@/lib/scraperCsv";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,16 +58,22 @@ const LEAD_SOURCE_LABELS: Record<string, string> = {
 export default function ImportPage() {
   const [campaigns,  setCampaigns]  = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
-  const [tab,        setTab]        = useState<"csv" | "manual">("csv");
+  const [tab,        setTab]        = useState<"csv" | "scraper" | "manual">("csv");
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploading,   setUploading]   = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lastImport,  setLastImport]  = useState<LastImport | null>(null);
 
-  // Preview state
+  // Preview state (CSV tab)
   const [pendingFile,   setPendingFile]   = useState<File | null>(null);
   const [preview,       setPreview]       = useState<CsvPreviewResult | null>(null);
   const [showAllInvalid, setShowAllInvalid] = useState(false);
+
+  // Preview state (Maps Scraper tab) — kept separate from the CSV tab's state so
+  // switching tabs never leaks one tab's selected file into the other.
+  const [scraperPendingFile, setScraperPendingFile] = useState<File | null>(null);
+  const [scraperParsed, setScraperParsed] = useState<ReturnType<typeof parseScraperCsv> | null>(null);
+  const [defaultChannel, setDefaultChannel] = useState<NonEmailChannel>("facebook");
 
   // Manual form
   const [businessName,   setBusinessName]   = useState("");
@@ -79,6 +86,7 @@ export default function ImportPage() {
   const [manualError,    setManualError]    = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const scraperFileRef = useRef<HTMLInputElement>(null);
 
   // Load campaigns (previously swallowed errors with `.catch(() => {})` — GAPS 4.2)
   useEffect(() => {
@@ -100,17 +108,24 @@ export default function ImportPage() {
     } catch { /* ignore */ }
   }, []);
 
-  async function uploadFile(file: File) {
+  async function uploadFile(
+    file: File,
+    opts?: { format?: "scraper"; defaultChannel?: NonEmailChannel }
+  ) {
     if (!campaignId) {
       setUploadError("No campaign selected");
       return;
     }
+    const isScraper = opts?.format === "scraper";
+    const activeRef = isScraper ? scraperFileRef : fileRef;
     setUploading(true);
     setUploadError(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("campaignId", campaignId);
+      if (opts?.format) formData.append("format", opts.format);
+      if (opts?.defaultChannel) formData.append("defaultChannel", opts.defaultChannel);
       const res = await fetch("/api/contacts/import", { method: "POST", body: formData });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -133,14 +148,19 @@ export default function ImportPage() {
       };
       localStorage.setItem(LS_KEY, JSON.stringify(li));
       setLastImport(li);
-      // Clear preview after successful upload
-      setPendingFile(null);
-      setPreview(null);
+      // Clear preview after successful upload — whichever tab initiated it
+      if (isScraper) {
+        setScraperPendingFile(null);
+        setScraperParsed(null);
+      } else {
+        setPendingFile(null);
+        setPreview(null);
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      if (activeRef.current) activeRef.current.value = "";
     }
   }
 
@@ -185,6 +205,38 @@ export default function ImportPage() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  /** Parse a scraper CSV client-side and show the preview panel (does not upload). */
+  async function handleScraperFileSelected(file: File) {
+    setUploadError(null);
+    try {
+      const text = await file.text();
+      const result = parseScraperCsv(text);
+      setScraperPendingFile(file);
+      setScraperParsed(result);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleScraperFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) void handleScraperFileSelected(file);
+  }
+
+  function handleScraperDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void handleScraperFileSelected(file);
+  }
+
+  function handleScraperCancelPreview() {
+    setScraperPendingFile(null);
+    setScraperParsed(null);
+    setUploadError(null);
+    if (scraperFileRef.current) scraperFileRef.current.value = "";
+  }
+
   async function handleManualAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!campaignId) { setManualError("No campaign selected"); return; }
@@ -218,6 +270,22 @@ export default function ImportPage() {
       setManualLoading(false);
     }
   }
+
+  // Derived preview for the Maps Scraper tab. Recomputed on every defaultChannel
+  // change (not frozen at parse time) so switching the select updates the counts.
+  const scraperPreview = useMemo(() => {
+    if (!scraperParsed) return null;
+    const ready: Array<{ businessName: string; channel: NonEmailChannel; handle: string }> = [];
+    for (const row of scraperParsed.rows) {
+      const channel = deriveChannel(row, defaultChannel);
+      if (channel) {
+        const handle = channel === "facebook" ? row.facebook : channel === "instagram" ? row.instagram : row.phone;
+        ready.push({ businessName: row.businessName, channel, handle });
+      }
+    }
+    const skipped = scraperParsed.errors.length + (scraperParsed.rows.length - ready.length);
+    return { ready, skipped };
+  }, [scraperParsed, defaultChannel]);
 
   const monoLabel: React.CSSProperties = {
     fontFamily: mono,
@@ -298,7 +366,7 @@ export default function ImportPage() {
           marginTop: 18,
         }}
       >
-        {(["csv", "manual"] as const).map((t) => (
+        {(["csv", "scraper", "manual"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -307,7 +375,7 @@ export default function ImportPage() {
               flex: 1,
               fontFamily: grotesk,
               fontWeight: 600,
-              fontSize: 14.5,
+              fontSize: 13.5,
               padding: "12px",
               borderRadius: 6,
               border: tab === t ? "1px solid #D3C9B4" : "1px solid transparent",
@@ -317,7 +385,7 @@ export default function ImportPage() {
               transition: "all 0.1s",
             }}
           >
-            {t === "csv" ? "Upload CSV" : "Add manually"}
+            {t === "csv" ? "Upload CSV" : t === "scraper" ? "Maps Scraper" : "Add manually"}
           </button>
         ))}
       </div>
@@ -774,6 +842,427 @@ export default function ImportPage() {
                       businessName · contactEmail · contactName
                       <br />
                       keyPoints · leadSource · campaignId
+                    </div>
+                  </div>
+                </>
+              </div>
+              {uploadError && (
+                <div style={{ marginTop: 14, textAlign: "center" }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: CLAY,
+                    }}
+                  >
+                    {uploadError}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Maps Scraper tab */}
+      {tab === "scraper" && (
+        <div style={{ marginTop: 18 }}>
+          <input
+            ref={scraperFileRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: "none" }}
+            onChange={handleScraperFileChange}
+          />
+
+          {/* Default channel select */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={monoLabel}>DEFAULT CHANNEL</label>
+            <select
+              className={inputClass}
+              value={defaultChannel}
+              onChange={(e) => setDefaultChannel(e.target.value as NonEmailChannel)}
+            >
+              <option value="facebook">Facebook</option>
+              <option value="instagram">Instagram</option>
+              <option value="phone">Phone</option>
+            </select>
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 10,
+                color: FAINT2,
+                letterSpacing: "0.04em",
+                marginTop: 8,
+                lineHeight: 1.6,
+              }}
+            >
+              Used when a business has that handle — otherwise falls back to Facebook → Instagram → Phone.
+            </div>
+          </div>
+
+          {/* ── Preview panel (shown after file is selected) ── */}
+          {scraperParsed && scraperPreview && scraperPendingFile ? (
+            <div>
+              {/* Preview header */}
+              <Panel style={{ padding: "18px 20px 16px" }}>
+                {/* Title row */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <span
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.12em",
+                        color: FAINT,
+                      }}
+                    >
+                      Preview
+                    </span>
+                    <div
+                      style={{
+                        fontFamily: grotesk,
+                        fontWeight: 600,
+                        fontSize: 15,
+                        color: INK,
+                        marginTop: 4,
+                      }}
+                    >
+                      {scraperPendingFile.name}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleScraperCancelPreview}
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: FAINT2,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px 6px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {/* Stat bar */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                    marginTop: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      backgroundColor: scraperPreview.ready.length > 0 ? "#EAF2E7" : "#F5EFDF",
+                      border: `1px solid ${scraperPreview.ready.length > 0 ? "#C6D8C0" : "#CBBF9F"}`,
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 28,
+                        fontWeight: 400,
+                        color: scraperPreview.ready.length > 0 ? "#1C6E3A" : "#7A7263",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {scraperPreview.ready.length}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.1em",
+                        color: scraperPreview.ready.length > 0 ? "#1C6E3A" : "#7A7263",
+                        marginTop: 6,
+                      }}
+                    >
+                      Ready to import
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      backgroundColor: scraperPreview.skipped > 0 ? "#F7E8E2" : "#F5EFDF",
+                      border: `1px solid ${scraperPreview.skipped > 0 ? "#E0C4B8" : "#CBBF9F"}`,
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 28,
+                        fontWeight: 400,
+                        color: scraperPreview.skipped > 0 ? "#A23B28" : "#7A7263",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {scraperPreview.skipped}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.1em",
+                        color: scraperPreview.skipped > 0 ? "#A23B28" : "#7A7263",
+                        marginTop: 6,
+                      }}
+                    >
+                      Will skip
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scope note */}
+                <div
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 10,
+                    color: FAINT2,
+                    letterSpacing: "0.05em",
+                    marginTop: 12,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Suppressed and duplicate rows are detected on import — not shown here.
+                </div>
+              </Panel>
+
+              {/* Ready rows sample table */}
+              {scraperPreview.ready.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      color: FAINT2,
+                      marginBottom: 8,
+                    }}
+                  >
+                    {scraperPreview.ready.length > SAMPLE_MAX
+                      ? `Sample — first ${SAMPLE_MAX} of ${scraperPreview.ready.length} ready rows`
+                      : `Ready rows`}
+                  </div>
+                  <div
+                    style={{
+                      border: "1px solid #D3C9B4",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Table header */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "3fr 2fr 3fr",
+                        backgroundColor: "#F0EBE0",
+                        borderBottom: "1px solid #D3C9B4",
+                        padding: "6px 12px",
+                      }}
+                    >
+                      {["Business", "Channel", "Handle"].map((h) => (
+                        <span
+                          key={h}
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 9.5,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                            color: FAINT2,
+                          }}
+                        >
+                          {h}
+                        </span>
+                      ))}
+                    </div>
+                    {/* Table rows */}
+                    {scraperPreview.ready.slice(0, SAMPLE_MAX).map((row, idx) => (
+                      <div
+                        key={`${row.businessName}-${idx}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "3fr 2fr 3fr",
+                          padding: "8px 12px",
+                          borderBottom: idx < Math.min(scraperPreview.ready.length, SAMPLE_MAX) - 1
+                            ? "1px solid #EAE3D5"
+                            : "none",
+                          backgroundColor: idx % 2 === 0 ? "#FCFAF3" : "#F8F5EC",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontSize: 13,
+                            color: INK,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.businessName}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 10,
+                            color: FAINT2,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          {row.channel}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 11.5,
+                            color: "#5A5344",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.handle}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {uploadError && (
+                <div style={{ marginTop: 14, textAlign: "center" }}>
+                  <span
+                    style={{
+                      fontFamily: mono,
+                      fontSize: 10.5,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: CLAY,
+                    }}
+                  >
+                    {uploadError}
+                  </span>
+                </div>
+              )}
+
+              {/* Import confirm button */}
+              <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+                <Button
+                  variant="primary"
+                  disabled={uploading || scraperPreview.ready.length === 0}
+                  onClick={() => {
+                    if (scraperPendingFile) {
+                      void uploadFile(scraperPendingFile, { format: "scraper", defaultChannel });
+                    }
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  {uploading
+                    ? "Importing…"
+                    : scraperPreview.ready.length === 0
+                      ? "No valid rows to import"
+                      : `Import ${scraperPreview.ready.length} row${scraperPreview.ready.length === 1 ? "" : "s"}`}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => scraperFileRef.current?.click()}
+                >
+                  Change file
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* ── Dropzone (shown when no file is pending) ── */
+            <>
+              <div
+                onClick={() => { if (!uploading) scraperFileRef.current?.click(); }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleScraperDrop}
+                style={{
+                  backgroundColor: isDragOver ? "#F1E9D2" : "#F5EFDF",
+                  border: `1.5px dashed ${isDragOver ? "#A99E86" : "#CBBF9F"}`,
+                  borderRadius: 10,
+                  padding: "50px 28px",
+                  textAlign: "center",
+                  cursor: uploading ? "default" : "pointer",
+                  transition: "all 0.1s",
+                }}
+              >
+                {/* Upload icon tile */}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    width: 40,
+                    height: 40,
+                    backgroundColor: "#FCFAF3",
+                    border: "1px solid #D3C9B4",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Upload size={16} color="#5A5344" />
+                </div>
+
+                <>
+                  <div
+                    style={{
+                      fontFamily: grotesk,
+                      fontWeight: 600,
+                      fontSize: 16,
+                      color: INK,
+                      marginTop: 16,
+                    }}
+                  >
+                    Drop your scraper CSV here
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: grotesk,
+                      fontSize: 14.5,
+                      color: "#5A5344",
+                      marginTop: 6,
+                    }}
+                  >
+                    or{" "}
+                    <span style={{ color: FOREST, textDecoration: "underline" }}>
+                      browse files
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 16 }}>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: 10,
+                        color: FAINT2,
+                        letterSpacing: "0.06em",
+                        lineHeight: 1.8,
+                      }}
+                    >
+                      name · category · rating · review_count
+                      <br />
+                      facebook · instagram · phone · place_id
                     </div>
                   </div>
                 </>
