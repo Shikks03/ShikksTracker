@@ -54,6 +54,58 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
 
 ## Session Log
 
+- **2026-07-29** — **Multi-channel outreach (Phases 1–5) implemented** on branch
+  `feature/multi-channel-outreach` (commits `d979d25`, `9e0fabe`, `ffff9d4`, `b4ce141`,
+  `36629a8`). Sonnet implementer subagents, coordinator review + verification per phase.
+  **Why:** the Maps Lead Scraper (separate Chrome extension at
+  `C:\Users\Shikks\Projects\ClaudeProjects\scraper`) exports a 29-column CSV of Philippine
+  businesses with **no email addresses and no contact names**, so its output could not feed
+  an email-only tool. Decision: make ShikksTracker multi-channel rather than hunt for
+  emails. Reality that shaped the design — **email is the only channel that can be safely
+  automated**; Facebook/Instagram/phone have no ToS-safe cold-outreach API, so for those the
+  tool AI-drafts, reminds and logs, but **the human sends manually**. Scope was an MVP
+  slice: `EmailLog` was deliberately NOT renamed to `OutreachLog`, and email automation is
+  untouched.
+  **P1 data model:** `Contact.outreachChannel` + `phone`/`facebook`/`instagram`/`website`,
+  scraper provenance (`sourcePlaceId`/`webPresenceTier`/`claimed`), conditionally-required
+  `contactEmail`; `EmailLog.channel`, conditional `subject`, `sentManuallyAt`.
+  **P2 scraper import:** `src/lib/scraperCsv.ts` (`parseScraperCsv` /
+  `buildScraperKeyPoints` / `deriveChannel`), a non-email branch in `createContactChecked`,
+  `format=scraper` + `defaultChannel` on the import route, and a third "Maps Scraper" mode
+  on `/import`.
+  **P3 drafting/send:** channel-specific prompts (`SOCIAL_DM_SYSTEM_PROMPT`,
+  `PHONE_SCRIPT_SYSTEM_PROMPT`) using a subject-less `message_draft` tool;
+  `EMAIL_CHANNEL_QUERY` restricts Gmail auto-send to email logs;
+  `advanceContactAfterSend` extracted so cron and manual sends share state logic.
+  **P4 board:** `GET /api/outreach-logs`, `POST /api/outreach-logs/[id]/mark-sent`
+  (atomic claim before advancing, so a double-click can't double-advance the stage),
+  `/outreach` page, Outreach nav item, channel fields on contact detail.
+  Tests 311 → 396; tsc + production build green throughout.
+  **Bugs caught in review (not by the agents that wrote the code):**
+  (a) P1's `{sourcePlaceId, campaignId}` index used `sparse: true` — wrong for a *compound*
+  index, since Mongo only skips a doc missing ALL keys and `campaignId` is always present,
+  so the second email contact in any campaign would have hit a duplicate-key error and
+  broken ordinary email imports; now a `partialFilterExpression` (`9e0fabe`).
+  (b) the daily-cap counter counted every `sent` log, so marking social messages sent would
+  consume the Gmail warm-up budget and silently halt email sending mid-day — now filtered in
+  both `sendApproved` and `/api/send-batch`.
+  (c) `sendOneLog`'s guard and `EMAIL_CHANNEL_QUERY` disagreed about legacy channel-less
+  logs; verified dormant (Mongoose applies the schema default on hydration, so they read
+  back as `"email"`) but made consistent, since it breaks under `.lean()`.
+  Also consolidated the handle-URL normaliser + channel badges, which two agents had
+  duplicated verbatim, into `src/lib/channels.ts` + `src/components/ChannelBadges.tsx`.
+  **Not verified live:** no `/outreach` run against a real DB, and AI drafting for the new
+  channels is unexercised — per the project's skip-credential-gated convention, covered by
+  unit tests only.
+  **⚠ DEPLOY-TIME MIGRATION (must happen before the first scraper import):** two Contact
+  indexes changed shape. Mongoose does **not** drop and rebuild a redefined index on an
+  existing collection, so the live Atlas DB still carries the old plain-unique
+  `{contactEmail, campaignId}` index, which will **reject every email-less contact**. Run
+  `Contact.syncIndexes()` once against production (or drop the two old indexes manually in
+  Atlas and let the app rebuild them). Verify afterwards that
+  `{contactEmail, campaignId}` and `{sourcePlaceId, campaignId}` both show a
+  `partialFilterExpression`.
+
 - **2026-07-04** — Project bootstrapped: SPEC.md copied in, CLAUDE.md and SESSION_NOTES.md created, spec open questions resolved by interview (see Decisions Locked). No code yet.
 - **2026-07-04 (later)** — Post-build fixes: HTML-escaped CSV-derived fields in the takeover alert email (security review finding, 715544a); fixed dashboard crash `campaigns.map is not a function` when the campaigns API returns an error object instead of an array — guarded the two unchecked fetches on `/` and `/import` (c1e218d). User has started running the app locally; next session continues from the "Pending user actions" list above (DB → Gmail OAuth → Anthropic key → deploy → pinger → warm-up batch).
 - **2026-07-04** — All 14 phases implemented in one session (Sonnet implementer subagents, per-phase spec+quality review by coordinator). Notable review catches fixed along the way: failed-connection caching in db.ts, literal `To: me` header in test-send, draft-cap starvation + approved-queue head-of-line blocking in the sequence engine, campaignId ObjectId cast in the stats aggregation. Everything verified via tsc + production build (27 routes); anything needing live credentials is deferred to the user actions above.

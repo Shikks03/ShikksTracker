@@ -35,6 +35,41 @@ Single-user, self-hosted cold-email outreach tool for Philippine small businesse
   - **Amendment (2026-07-10, Task 3.1):** status enum gains `"sending"` (draft → approved → **sending** → sent), a transient claim state set atomically before the Gmail call to prevent duplicate sends. Also adds `sendAttemptedAt` (Date, set on claim), `sendErrorCount` (Number), `lastSendError` (String). A stale-`sending` sweep at the start of each engine run reverts logs stuck > 10 min to `"draft"` for human verification.
 - **Suppression** — `email` (indexed, lowercase-normalized), `reason: "unsubscribed" | "bounced" | "manual"`, `addedAt`
 
+### Multi-channel amendment (2026-07-29, feature/multi-channel-outreach)
+
+The Maps Lead Scraper (separate Chrome extension) exports Philippine businesses with **no
+emails and no contact names**, so outreach became multi-channel. **Email is the only channel
+that can be safely automated** — Facebook/Instagram/phone have no ToS-safe cold-outreach
+API, so for those the tool AI-drafts, reminds and logs, but **the user sends manually** and
+clicks "Mark sent". This was an MVP slice: `EmailLog` is deliberately NOT renamed to
+`OutreachLog`, and the email path is untouched.
+
+- **Contact** gains `outreachChannel: "email" | "facebook" | "instagram" | "phone"`
+  (default `"email"`), contact vectors `phone`/`facebook`/`instagram`/`website`, and scraper
+  provenance `sourcePlaceId`/`webPresenceTier`/`claimed`. `contactEmail` is **conditionally
+  required** — only when `outreachChannel === "email"`.
+- **EmailLog** gains `channel` (same enum, default `"email"`), `subject` required only for
+  email, and `sentManuallyAt` (distinguishes a hand-logged send from a Gmail send).
+- **Indexes:** `{contactEmail, campaignId}` and `{sourcePlaceId, campaignId}` are both
+  **partial** unique (`partialFilterExpression: { <field>: { $type: "string" } }`), NOT
+  sparse. A *compound* sparse index still indexes a doc that has any one key, and
+  `campaignId` is always present — so `sparse` would make every email-less contact (and
+  every contact lacking a placeId) collide on `null`. **See the deploy-time migration note
+  in SESSION_NOTES.md — Mongoose will not rebuild these on the live DB by itself.**
+
+**The load-bearing invariant: Gmail auto-send must never touch a non-email log.** It is
+enforced in three independent places — `sendApproved`'s query (`EMAIL_CHANNEL_QUERY`), a
+guard inside `sendOneLog` (because `/api/send-batch` calls it directly), and the daily-cap
+counter. The cap is a *Gmail deliverability budget*, so manually-sent social/phone logs are
+excluded; counting them would silently halt email sending for the rest of the Manila day.
+
+**Legacy-log convention:** logs written before `channel` existed have no such field. Every
+predicate treats a missing/null `channel` as **email** (`EMAIL_CHANNEL_QUERY` in
+`sequence.ts`, `isNonEmailChannel` in `outreachLogs.ts`). Never use `channel: { $ne: "email" }`
+to find social logs — it would match those legacy email logs too. Note that hydrated
+Mongoose docs mask this (the schema default fills `channel` on read) but `.lean()` reads do
+not, so write predicates that are correct either way.
+
 ## Review Gate (amendment to SPEC.md §5–6)
 
 The sequence engine is split into two steps instead of generate-and-send in one pass:
@@ -133,6 +168,14 @@ src/
     contacts.ts        createContactChecked (validate→suppress→dupe→insert) + suppressContact
                        (shared suppress helper: Suppression upsert + status + delete pending logs)
     csv.ts             parseContactsCsv (papaparse, case-insensitive headers)
+    scraperCsv.ts      Maps Scraper CSV: parseScraperCsv (strips the UTF-8 BOM the
+                       extension writes — without it the first header is "﻿name"
+                       and every row silently fails to match), buildScraperKeyPoints
+                       (deterministic personalisation string — load-bearing, it's what
+                       draft.ts opens with), deriveChannel (fb → ig → phone fallback)
+    channels.ts        pure: normalizeHandleUrl/normalizeWebsiteUrl/telHref (scraped
+                       handles may be full URLs, bare domains or "@handle"), CHANNEL_META
+    outreachLogs.ts    NON_EMAIL_CHANNEL_QUERY, isNonEmailChannel, checkMarkSentAllowed
     api.ts             handleError (mongoose→HTTP mapping), notFound
   app/api/           Route handlers. Session-cookie auth via src/proxy.ts middleware (2026-07-08);
                      public exceptions: track/*, cron/*, test/*, health, auth/login (GAPS #1 fixed):
@@ -142,13 +185,17 @@ src/
     email-logs[, /[id], /batch]     list/create-approved; PATCH draft↔approved, sent+sending immutable
     auth/login                      POST password → HMAC session cookie (Phase 1)
     send-batch                      manual send of chosen approved logs (cap yes, window no)
+    outreach-logs[, /[id]/mark-sent]    non-email board: list drafts w/ joined contact;
+                                        mark-sent claims the log atomically BEFORE
+                                        advancing the contact (double-click safety),
+                                        then reuses advanceContactAfterSend. No Gmail.
     cron/sequence, cron/check-replies   engine entry points (CRON_SECRET)
     track/open/[pixelId], track/click/[trackingId]   public tracking
     auth/gmail[, /callback]         one-time OAuth bootstrap (dev tool; 404 outside dev unless ALLOW_OAUTH_BOOTSTRAP)
     test/send-self, test/generate-draft  smoke tests (CRON_SECRET)
     stats/lead-sources, health
-  app/               Pages (all "use client"): / dashboard, /review, /compose, /import,
-                     /campaigns, /contacts/[id], /suppressions
+  app/               Pages (all "use client"): / dashboard, /review, /outreach, /compose,
+                     /import, /campaigns, /contacts/[id], /suppressions
   components/        Sidebar (dark, live draft badge), ui.tsx (design primitives),
                      tokens.ts (shared fonts+palette — single source), StatusBadge,
                      useNextSendCountdown
@@ -273,6 +320,15 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
 - Docs drift: mostly reconciled through 2026-07-11 (README scoring is +1/+3/+10,
   "regenerate" removed, `/compose` listed). Treat code as truth, SPEC.md for intent,
   SESSION_NOTES.md for the change narrative.
+- **Multi-channel (2026-07-29):** `/outreach` and the scraper import have **not been run
+  against a live DB**, and AI drafting for the social/phone prompts is unexercised (no
+  `ANTHROPIC_API_KEY` at build time) — unit tests only, per the skip-credential-gated
+  convention. The **index migration in SESSION_NOTES.md must be run before the first
+  scraper import** or every email-less contact will be rejected by the stale unique index.
+  Manual replies on social/phone have no detection — the user moves the pipeline stage by
+  hand; the Gmail reply/alert engine stays email-only. Known future work: `EmailLog` is
+  misnamed now that it carries social/phone logs (a rename to `OutreachLog` was
+  deliberately deferred out of the MVP slice).
 - Local-workspace dirs (`tools/`, `graphify-out/`, `.planning/`, `design reference/`)
   are gitignored as of 2026-07-08. Note: `design reference/` is the visual source of
   truth for the UI — it is deliberately local-only; remove its `.gitignore` line if the

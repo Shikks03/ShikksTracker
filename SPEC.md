@@ -4,6 +4,24 @@
 
 **How to use this doc:** Feed this into Claude Code as your spec (drop it in as `SPEC.md` alongside a `CLAUDE.md`/`SESSION_NOTES.md`). Build it phase by phase per the plan at the end — don't try to build everything in one shot.
 
+> **Amendment — multi-channel outreach (2026-07-29).** This spec describes an *email-only*
+> system, and that remains the description of the automated path. Since it was written, the
+> tool also ingests the Maps Lead Scraper's CSV export, which contains **no email addresses**
+> — those leads are reached over Facebook, Instagram or phone instead.
+>
+> The intent change is narrow but important: ShikksTracker is now an outreach CRM with **one
+> automated channel (email) and several manually-tracked channels**. Email is the only
+> channel with a ToS-safe cold-outreach API, so for the others the system AI-drafts the
+> message, tells you it's due, and records that you sent it — but *you* send it, on the
+> platform. Everything in §4–§8 (Gmail sending, threading, open/click tracking) and §13
+> (reply detection and the takeover alert) is **email-only by design** and deliberately does
+> not apply to the other channels; responses there are recorded by moving the pipeline stage
+> by hand.
+>
+> Sections §3 (data models), §5 (sequence engine) and §9 (import) are extended rather than
+> replaced — see the "Multi-channel amendment" section of `CLAUDE.md` for the field-level
+> detail, the three-place email-only send invariant, and the legacy-log convention.
+
 ---
 
 ## 1. Goals & Non-Goals
