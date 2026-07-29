@@ -8,8 +8,31 @@
  * Does NOT call the Anthropic API — only the pure buildUserMessage helper is tested.
  */
 
-import { describe, it, expect } from "vitest";
-import { buildUserMessage } from "@/lib/draft";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Mock the Anthropic SDK so generateEmailDraft's channel-branching logic can
+// be exercised without a real API call. vi.mock is hoisted above imports, so
+// the mock function itself must come from vi.hoisted to avoid a
+// temporal-dead-zone reference error.
+// ---------------------------------------------------------------------------
+
+const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(function AnthropicMock() {
+    return { messages: { create: mockCreate } };
+  }),
+}));
+
+import {
+  buildUserMessage,
+  buildChannelUserMessage,
+  generateEmailDraft,
+  SYSTEM_PROMPT,
+  SOCIAL_DM_SYSTEM_PROMPT,
+  PHONE_SCRIPT_SYSTEM_PROMPT,
+} from "@/lib/draft";
 import type { DraftInput } from "@/lib/draft";
 
 // ---------------------------------------------------------------------------
@@ -213,5 +236,199 @@ describe("buildUserMessage — with feedback + previousAttempt", () => {
       feedback: "Too generic",
     });
     expect(msg).toContain("--- END REJECTED DRAFT ---");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildChannelUserMessage — non-email builder
+// ---------------------------------------------------------------------------
+
+describe("buildChannelUserMessage", () => {
+  it("states the channel explicitly for facebook", () => {
+    const msg = buildChannelUserMessage({ ...BASE_INPUT, channel: "facebook" });
+    expect(msg).toContain("Channel: Facebook DM");
+  });
+
+  it("states the channel explicitly for instagram", () => {
+    const msg = buildChannelUserMessage({ ...BASE_INPUT, channel: "instagram" });
+    expect(msg).toContain("Channel: Instagram DM");
+  });
+
+  it("states the channel explicitly for phone", () => {
+    const msg = buildChannelUserMessage({ ...BASE_INPUT, channel: "phone" });
+    expect(msg).toContain("Channel: Phone call");
+  });
+
+  it("omits email-specific framing (no 'Subject:' label, no 'email(s)' wording)", () => {
+    const msg = buildChannelUserMessage({
+      ...BASE_INPUT,
+      channel: "facebook",
+      stage: 2,
+      previousEmails: [{ subject: "Hello", body: "Earlier touch body" }],
+    });
+    expect(msg).not.toContain("Subject:");
+    expect(msg).not.toContain("Previous email(s)");
+    expect(msg).toContain("Previous message(s) sent to this contact:");
+    expect(msg).toContain("Earlier touch body");
+  });
+
+  it("still includes the standard contact/campaign fields", () => {
+    const msg = buildChannelUserMessage({ ...BASE_INPUT, channel: "facebook" });
+    expect(msg).toContain("Business name: Sunrise Bakery");
+    expect(msg).toContain("Offer summary: Affordable social media management");
+    expect(msg).toContain("Key points / personalization notes:");
+  });
+
+  it("includes a rejected-draft section without a rejected subject line", () => {
+    const msg = buildChannelUserMessage({
+      ...BASE_INPUT,
+      channel: "phone",
+      previousAttempt: { subject: "", body: "Rejected phone script body" },
+      feedback: "Too pushy",
+    });
+    expect(msg).toContain("--- REJECTED DRAFT (do NOT repeat this) ---");
+    expect(msg).toContain("Rejected message:\nRejected phone script body");
+    expect(msg).not.toContain("Rejected subject:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateEmailDraft — channel branching (mocked Anthropic client)
+// ---------------------------------------------------------------------------
+
+describe("generateEmailDraft — channel branching", () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+    process.env.ANTHROPIC_API_KEY = "test-key";
+  });
+
+  it("email channel (default, channel omitted) uses SYSTEM_PROMPT and the email_draft tool", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { subject: "Quick idea for Sunrise Bakery", body: "Hi Maria, ..." } }],
+    });
+
+    const result = await generateEmailDraft(BASE_INPUT);
+
+    expect(result).toEqual({
+      subject: "Quick idea for Sunrise Bakery",
+      body: "Hi Maria, ...",
+    });
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.system).toBe(SYSTEM_PROMPT);
+    expect(callArgs.tools[0].name).toBe("email_draft");
+    expect(callArgs.tools[0].input_schema.required).toEqual(["subject", "body"]);
+    expect(callArgs.tool_choice).toEqual({ type: "tool", name: "email_draft" });
+  });
+
+  it("explicit channel: 'email' behaves identically to omitting channel", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { subject: "S", body: "B" } }],
+    });
+
+    await generateEmailDraft({ ...BASE_INPUT, channel: "email" });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.system).toBe(SYSTEM_PROMPT);
+    expect(callArgs.tools[0].name).toBe("email_draft");
+  });
+
+  it("facebook channel selects SOCIAL_DM_SYSTEM_PROMPT and the message_draft tool", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { body: "Hey! Loved the pandesal photos on your page." } }],
+    });
+
+    const result = await generateEmailDraft({ ...BASE_INPUT, channel: "facebook" });
+
+    expect(result).toEqual({
+      subject: "",
+      body: "Hey! Loved the pandesal photos on your page.",
+    });
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.system).toBe(SOCIAL_DM_SYSTEM_PROMPT);
+    expect(callArgs.tools[0].name).toBe("message_draft");
+    expect(callArgs.tools[0].input_schema.required).toEqual(["body"]);
+    expect(callArgs.tools[0].input_schema.properties.subject).toBeUndefined();
+    expect(callArgs.tool_choice).toEqual({ type: "tool", name: "message_draft" });
+  });
+
+  it("instagram channel also selects SOCIAL_DM_SYSTEM_PROMPT and the message_draft tool", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { body: "Hi! Quick idea for your account." } }],
+    });
+
+    const result = await generateEmailDraft({ ...BASE_INPUT, channel: "instagram" });
+
+    expect(result.subject).toBe("");
+    expect(result.body).toBe("Hi! Quick idea for your account.");
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.system).toBe(SOCIAL_DM_SYSTEM_PROMPT);
+    expect(callArgs.tools[0].name).toBe("message_draft");
+  });
+
+  it("phone channel selects PHONE_SCRIPT_SYSTEM_PROMPT and the message_draft tool", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { body: "Hi, this is Alex calling about your bakery's socials — got 30 seconds?" } }],
+    });
+
+    const result = await generateEmailDraft({ ...BASE_INPUT, channel: "phone" });
+
+    expect(result).toEqual({
+      subject: "",
+      body: "Hi, this is Alex calling about your bakery's socials — got 30 seconds?",
+    });
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.system).toBe(PHONE_SCRIPT_SYSTEM_PROMPT);
+    expect(callArgs.tools[0].name).toBe("message_draft");
+  });
+
+  it("non-email channels never require or read a subject from the model", async () => {
+    // Model returns a subject anyway (e.g. it ignored instructions) — the
+    // non-email path must not surface it; result.subject is always "".
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { subject: "Leaked subject", body: "Body text" } }],
+    });
+
+    const result = await generateEmailDraft({ ...BASE_INPUT, channel: "facebook" });
+    expect(result.subject).toBe("");
+    expect(result.body).toBe("Body text");
+  });
+
+  it("throws a clear error when a non-email response has an empty body", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { body: "   " } }],
+    });
+
+    await expect(generateEmailDraft({ ...BASE_INPUT, channel: "phone" })).rejects.toThrow(
+      /empty body/i
+    );
+  });
+
+  it("does NOT run the email path's empty-subject check on the non-email path", async () => {
+    // A body-only response with no subject field at all must not throw an
+    // "empty subject" error — there is no subject to fill on this path.
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { body: "A perfectly fine DM body." } }],
+    });
+
+    await expect(
+      generateEmailDraft({ ...BASE_INPUT, channel: "instagram" })
+    ).resolves.toEqual({ subject: "", body: "A perfectly fine DM body." });
+  });
+
+  it("still throws on empty subject for the email channel (regression guard)", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { subject: "   ", body: "Body text" } }],
+    });
+
+    await expect(generateEmailDraft(BASE_INPUT)).rejects.toThrow(/empty subject/i);
+  });
+
+  it("still throws on empty body for the email channel (regression guard)", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { subject: "Subject", body: "   " } }],
+    });
+
+    await expect(generateEmailDraft(BASE_INPUT)).rejects.toThrow(/empty body/i);
   });
 });

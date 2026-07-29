@@ -230,6 +230,76 @@ export function computeNextSendAt(
 }
 
 // ---------------------------------------------------------------------------
+// Exported: advance Contact state after a log has been successfully sent
+// ---------------------------------------------------------------------------
+
+/**
+ * Advances Contact state (currentStage, pipelineStage, nextSendAt) after a
+ * log for `contact` has been successfully sent. This is the ONLY place that
+ * logic lives — extracted from `sendOneLog` as a pure refactor (behaviour is
+ * unchanged) so Phase 4's manual "mark sent" endpoint (for facebook/
+ * instagram/phone touches sent by the human on that platform) can share the
+ * exact same state transitions instead of re-deriving them.
+ *
+ * Signature / design choice: `campaign` is an OPTIONAL parameter rather than
+ * always re-loaded here. `sendOneLog` already has the campaign loaded (it
+ * needs `sequenceSpacingDays` for threading/stage logic earlier in the same
+ * call), so passing it in avoids a redundant query on the hot cron/send-batch
+ * path. Phase 4's manual mark-sent endpoint won't have a campaign in hand at
+ * the point it marks a log sent — when `campaign` is omitted, this function
+ * loads it itself via `log.campaignId` (falling back to the schema default
+ * `[0, 5, 9]` if the campaign is somehow missing, so a dangling reference
+ * can't throw here). Both call shapes produce identical Contact state.
+ */
+export async function advanceContactAfterSend(
+  contact: IContact,
+  log: IEmailLog,
+  sentAt: Date,
+  campaign?: Pick<ICampaign, "sequenceSpacingDays"> | null
+): Promise<void> {
+  let spacingDays = campaign?.sequenceSpacingDays;
+  if (!spacingDays) {
+    const loadedCampaign = (await Campaign.findById(log.campaignId)
+      .select({ sequenceSpacingDays: 1 })
+      .lean()) as Pick<ICampaign, "sequenceSpacingDays"> | null;
+    spacingDays = loadedCampaign?.sequenceSpacingDays ?? [0, 5, 9];
+  }
+
+  const contactUpdate: Record<string, unknown> = {
+    currentStage: log.stage,
+  };
+  if (log.stage === 1 && contact.pipelineStage === "not_started") {
+    contactUpdate.pipelineStage = "contacted";
+  }
+
+  let firstSentAt: Date;
+  if (log.stage === 1) {
+    firstSentAt = sentAt;
+  } else {
+    const stage1Log = await EmailLog.findOne({
+      contactId: contact._id,
+      stage: 1,
+      status: "sent",
+    })
+      .select({ sentAt: 1 })
+      .lean();
+    firstSentAt = stage1Log?.sentAt ?? sentAt;
+  }
+
+  if (log.stage < 3) {
+    contactUpdate.nextSendAt = computeNextSendAt(
+      firstSentAt,
+      spacingDays,
+      (log.stage + 1) as 2 | 3
+    );
+  } else {
+    contactUpdate.nextSendAt = null;
+  }
+
+  await Contact.findByIdAndUpdate(contact._id, contactUpdate);
+}
+
+// ---------------------------------------------------------------------------
 // Internal: fetch RFC-2822 Message-ID header from Gmail after send
 // ---------------------------------------------------------------------------
 
@@ -319,15 +389,24 @@ async function generateDrafts(): Promise<DraftsResult> {
       // on a contact that has been manually suppressed since the query ran.
       // Email equality is safe: both Contact.contactEmail and Suppression.email
       // are stored lowercase-normalised (lowercase: true in both schemas).
-      const suppressed = await Suppression.findOne({
-        email: contact.contactEmail,
-      }).lean();
-      if (suppressed) {
-        await applySuppressionTransition(contact._id);
-        result.errors.push(
-          `Contact ${String(contact._id)} (${contact.contactEmail}): suppressed — unsubscribed, pending logs deleted, skipped draft`
-        );
-        continue;
+      //
+      // Guarded on a non-empty contactEmail: for a non-email contact,
+      // contactEmail is undefined, and `Suppression.findOne({ email: undefined })`
+      // is NOT a safe no-op in MongoDB — it can match documents where the
+      // `email` field is absent/null, which is not the intent here. Only
+      // email-channel contacts (or legacy contacts that happen to have an
+      // email) go through the Suppression list.
+      if (typeof contact.contactEmail === "string" && contact.contactEmail) {
+        const suppressed = await Suppression.findOne({
+          email: contact.contactEmail,
+        }).lean();
+        if (suppressed) {
+          await applySuppressionTransition(contact._id);
+          result.errors.push(
+            `Contact ${String(contact._id)} (${contact.contactEmail}): suppressed — unsubscribed, pending logs deleted, skipped draft`
+          );
+          continue;
+        }
       }
 
       // Load campaign
@@ -354,7 +433,9 @@ async function generateDrafts(): Promise<DraftsResult> {
         body: l.body,
       }));
 
-      // Generate draft via Claude
+      // Generate draft via Claude — channel-aware (Phase 3): defaults to
+      // "email" inside generateEmailDraft when outreachChannel is absent
+      // (pre-migration contacts), so this is safe for legacy docs too.
       const draft = await generateEmailDraft({
         offerSummary: campaign.offerSummary,
         toneNotes: campaign.toneNotes,
@@ -363,9 +444,12 @@ async function generateDrafts(): Promise<DraftsResult> {
         keyPoints: contact.keyPoints,
         stage: targetStage,
         previousEmails: previousEmails.length ? previousEmails : undefined,
+        channel: contact.outreachChannel,
       });
 
-      // Persist as draft
+      // Persist as draft — channel carried onto the log so downstream queries
+      // (sendApproved, daily-cap counter, review queue) can tell email logs
+      // apart from social/phone logs that require a manual send.
       await EmailLog.create({
         contactId: contact._id,
         campaignId: contact.campaignId,
@@ -373,6 +457,7 @@ async function generateDrafts(): Promise<DraftsResult> {
         status: "draft",
         subject: draft.subject,
         body: draft.body,
+        channel: contact.outreachChannel,
       });
 
       result.created++;
@@ -657,39 +742,9 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       lastSendError: null,
     });
 
-    // Update Contact
-    const contactUpdate: Record<string, unknown> = {
-      currentStage: log.stage,
-    };
-    if (log.stage === 1 && contact.pipelineStage === "not_started") {
-      contactUpdate.pipelineStage = "contacted";
-    }
-
-    let firstSentAt: Date;
-    if (log.stage === 1) {
-      firstSentAt = sentAt;
-    } else {
-      const stage1Log = await EmailLog.findOne({
-        contactId: contact._id,
-        stage: 1,
-        status: "sent",
-      })
-        .select({ sentAt: 1 })
-        .lean();
-      firstSentAt = stage1Log?.sentAt ?? sentAt;
-    }
-
-    if (log.stage < 3) {
-      contactUpdate.nextSendAt = computeNextSendAt(
-        firstSentAt,
-        campaign.sequenceSpacingDays,
-        (log.stage + 1) as 2 | 3
-      );
-    } else {
-      contactUpdate.nextSendAt = null;
-    }
-
-    await Contact.findByIdAndUpdate(contact._id, contactUpdate);
+    // Update Contact (currentStage, pipelineStage, nextSendAt) — shared with
+    // Phase 4's manual mark-sent path via advanceContactAfterSend below.
+    await advanceContactAfterSend(contact, log, sentAt, campaign);
 
     return { status: "sent", contactName: contact.businessName, subject: subjectToSend };
   } catch (err) {
@@ -736,6 +791,28 @@ interface SendsResult {
   errors: string[];
 }
 
+/**
+ * Migration-safe predicate matching only email-channel EmailLogs — an
+ * explicit `channel: "email"`, OR a legacy log written before the `channel`
+ * field existed (the field is absent, or was left `null`).
+ *
+ * WHY this exists: Gmail auto-send (sendApproved, and by extension
+ * /api/send-batch's direct sendOneLog calls) must never pick up a non-email
+ * log. Facebook/Instagram/phone touches are AI-drafted but SENT MANUALLY by
+ * the human on that platform (Phase 4) — there is no Gmail message to send
+ * for them. The same predicate also gates the daily-cap counter below, since
+ * DAILY_SEND_CAP is a Gmail deliverability/warm-up budget that a manually
+ * "marked sent" social/phone touch must not consume.
+ *
+ * Exported so its shape can be asserted directly in unit tests without a
+ * live MongoDB connection (see sequence.test.ts).
+ */
+export const EMAIL_CHANNEL_QUERY: {
+  $or: Array<{ channel: "email" } | { channel: { $exists: false } } | { channel: null }>;
+} = {
+  $or: [{ channel: "email" }, { channel: { $exists: false } }, { channel: null }],
+};
+
 async function sendApproved(runStartMs: number): Promise<SendsResult> {
   const result: SendsResult = { sent: 0, skipped: [], errors: [] };
   const now = new Date();
@@ -745,10 +822,20 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
     return result;
   }
 
+  // DAILY_SEND_CAP exists solely as a Gmail deliverability / domain warm-up
+  // budget — it caps how many messages OUR Gmail account sends per day.
+  // Facebook/Instagram/phone touches are marked "sent" manually (Phase 4)
+  // after the user sends them by hand on that platform; those sends cost the
+  // Gmail sender reputation nothing and must NOT eat into this budget, or
+  // marking a batch of social touches "sent" in the morning would silently
+  // stall all email sending for the rest of the Manila day. Shares
+  // EMAIL_CHANNEL_QUERY with the approved-logs query below so both stay in
+  // lockstep.
   const dayStart = getManilaDayStart(now);
   const sentToday = await EmailLog.countDocuments({
     status: "sent",
     sentAt: { $gte: dayStart },
+    ...EMAIL_CHANNEL_QUERY,
   });
   const remaining = DAILY_SEND_CAP - sentToday;
   if (remaining <= 0) {
@@ -758,7 +845,15 @@ async function sendApproved(runStartMs: number): Promise<SendsResult> {
 
   const batchLimit = Math.min(remaining, SENDS_PER_RUN);
 
-  const approvedLogs = await EmailLog.find({ status: "approved" })
+  // Gmail auto-send must never pick up a non-email log — see
+  // EMAIL_CHANNEL_QUERY above for why. This query filter alone doesn't fully
+  // protect /api/send-batch's direct sendOneLog calls (a caller could still
+  // pass a non-email log's id) — sendOneLog's own channel guard is the
+  // defence-in-depth layer for that path.
+  const approvedLogs = await EmailLog.find({
+    status: "approved",
+    ...EMAIL_CHANNEL_QUERY,
+  })
     .sort({ _id: 1 })
     .limit(batchLimit);
 

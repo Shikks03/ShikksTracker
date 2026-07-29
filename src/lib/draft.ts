@@ -28,6 +28,12 @@ export interface DraftInput {
    * Only used when `previousAttempt` is also provided.
    */
   feedback?: string;
+  /**
+   * Outreach channel this draft is for. Defaults to "email" when omitted —
+   * every existing caller (pre multi-channel) implicitly means email, and
+   * that path must stay byte-identical to before this field existed.
+   */
+  channel?: "email" | "facebook" | "instagram" | "phone";
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +58,7 @@ const MODEL =
   (process.env.ANTHROPIC_MODEL as string | undefined) ?? "claude-sonnet-4-6";
 
 /** System prompt instructing Claude how to write outreach emails. */
-const SYSTEM_PROMPT = `You are a cold outreach specialist writing short, human-feeling outreach emails for Philippine small businesses.
+export const SYSTEM_PROMPT = `You are a cold outreach specialist writing short, human-feeling outreach emails for Philippine small businesses.
 
 RULES — follow every one, no exceptions:
 1. Under ~120 words. Plain text only. Paragraphs separated by a blank line. No HTML, no markdown, no bullet lists.
@@ -68,6 +74,56 @@ RULES — follow every one, no exceptions:
 8. Warm and direct tone. English is fine; keep it natural for a Philippine business audience.
 
 Use the email_draft tool to return your result.`;
+
+/**
+ * System prompt for Facebook/Instagram DM drafting. This is NOT an email —
+ * no subject line, no salutation block ("Dear X,"), no email sign-off
+ * ("Best regards," etc.). It will be pasted directly into a Facebook/Instagram
+ * DM composer box, so it must read like a short, casual direct message.
+ *
+ * Exported (like TEMPLATE_SYSTEM_PROMPT) so it's testable and easy to
+ * hand-tune independently of the email prompt.
+ */
+export const SOCIAL_DM_SYSTEM_PROMPT = `You are writing a short, casual Facebook/Instagram direct message for outreach to a Philippine small business. This text will be pasted directly into a Facebook or Instagram DM box — it is NOT an email.
+
+RULES — follow every one, no exceptions:
+1. Under ~60 words. 1–2 short paragraphs. Plain text only — no HTML, no markdown, no bullet lists.
+2. NO subject line. NO salutation block (no "Dear X," / "Hi X," on its own line). NO email sign-off (no "Best regards," "Sincerely," etc.). Write it the way a real person types a DM — it can still open with a quick greeting worked into the first sentence, but not as a formal letter opener.
+3. Open with something SPECIFIC to the business, drawn from keyPoints. NEVER open with a generic greeting alone.
+4. One clear, low-friction ask (e.g. "mind if I send over a quick idea?", "worth a quick chat?"). Do not ask for more than one thing.
+5. At most one "!" in the whole message. No ALL CAPS words. No link spam (at most one link, only if truly necessary).
+6. Respect toneNotes — but keep it casual and conversational regardless, since this is a DM, not a letter.
+7. Warm, direct, and natural for a Philippine small-business audience — like a real person reaching out, not a bot.
+8. Stage awareness:
+   - Stage 1 (initial): a friendly first touch referencing something specific about the business, then the one low-friction ask.
+   - Stage 2–3 (follow-ups): even shorter than the initial message. A brief, casual nudge — reference the earlier message lightly. Never guilt-trip, never repeat the whole pitch.
+
+Use the message_draft tool to return your result — body only, no subject.`;
+
+/**
+ * System prompt for a phone call opening script. This is spoken language the
+ * user reads aloud when the contact picks up — NOT written/email register.
+ *
+ * Exported (like TEMPLATE_SYSTEM_PROMPT) so it's testable and easy to
+ * hand-tune independently of the email prompt.
+ */
+export const PHONE_SCRIPT_SYSTEM_PROMPT = `You are writing a short phone call opening script for outreach to a Philippine small business. The user will READ THIS ALOUD when the contact answers the phone — it must sound like natural spoken language, not written prose or an email.
+
+RULES — follow every one, no exceptions:
+1. Under ~80 words.
+2. Spoken register: contractions are good ("I'm", "we're", "you're"). Short sentences. No email formatting, no bullet points, no "Dear"/"Best regards" — this is a script to be spoken, not read.
+3. Structure, in order:
+   a. A one-line self-introduction (who's calling, in one breath).
+   b. A specific reason for calling, drawn from keyPoints — something concrete about this business, not a generic pitch.
+   c. One permission-asking question near the end (e.g. "Do you have 30 seconds?" or "Is now an okay time?") — never launch straight into the full pitch.
+4. Warm, direct, conversational tone — like a real person calling, not reading a script off a card (even though they are).
+5. No spammy phrasing, no ALL CAPS, no hype language, at most one "!" if any.
+6. Respect toneNotes where it doesn't conflict with sounding natural when spoken aloud.
+7. Stage awareness:
+   - Stage 1 (initial): a first call — introduce, give the specific reason, ask permission to continue.
+   - Stage 2–3 (follow-ups): a shorter callback opener — briefly reference the earlier attempt/message, then the permission question.
+
+Use the message_draft tool to return your result — body only, no subject.`;
 
 export function buildUserMessage(input: DraftInput): string {
   const lines: string[] = [
@@ -112,46 +168,189 @@ export function buildUserMessage(input: DraftInput): string {
 }
 
 /**
- * Generates a cold-outreach email draft using Claude via forced tool use.
- * The model MUST call the `email_draft` tool — structured output is guaranteed.
+ * Builds the user-turn message for non-email channels (facebook/instagram/phone).
+ *
+ * Kept as a separate function rather than adding branches to `buildUserMessage`
+ * because `buildUserMessage`'s output is unit-tested byte-for-byte for the
+ * email path — threading a channel branch through it risks an accidental
+ * change to that output. A dedicated builder makes each path easy to read,
+ * easy to test in isolation, and impossible to cross-contaminate.
+ *
+ * Deliberately omits email-specific framing (no "Subject:"-shaped framing,
+ * previous touches are called "message(s)" rather than "email(s)") and states
+ * the channel explicitly so the model doesn't default to email register.
+ */
+export function buildChannelUserMessage(
+  input: DraftInput & { channel: "facebook" | "instagram" | "phone" }
+): string {
+  const channelLabel =
+    input.channel === "phone"
+      ? "Phone call"
+      : input.channel === "facebook"
+      ? "Facebook DM"
+      : "Instagram DM";
+
+  const lines: string[] = [
+    `Channel: ${channelLabel}`,
+    `Business name: ${input.businessName}`,
+    `Contact name: ${input.contactName ?? "(not provided)"}`,
+    `Stage: ${input.stage} (${input.stage === 1 ? "initial outreach" : input.stage === 2 ? "follow-up 1" : "follow-up 2"})`,
+    `Offer summary: ${input.offerSummary}`,
+    `Tone notes: ${input.toneNotes || "(none — default to professional and warm)"}`,
+    `Key points / personalization notes: ${input.keyPoints}`,
+  ];
+
+  if (
+    input.stage > 1 &&
+    input.previousEmails &&
+    input.previousEmails.length > 0
+  ) {
+    lines.push("\nPrevious message(s) sent to this contact:");
+    for (const [i, prev] of input.previousEmails.entries()) {
+      lines.push(`\n--- Message ${i + 1} ---`);
+      lines.push(prev.body);
+    }
+  }
+
+  if (input.previousAttempt) {
+    lines.push(
+      "\n--- REJECTED DRAFT (do NOT repeat this) ---",
+      `The previous draft attempt was REJECTED.`,
+      `Rejected message:\n${input.previousAttempt.body}`,
+    );
+    if (input.feedback) {
+      lines.push(`Reason for rejection: ${input.feedback}`);
+    }
+    lines.push(
+      `Write a NEW draft addressing ${input.feedback ? "the feedback above" : "the reviewer's concerns"} — do not repeat the rejected version.`,
+      "--- END REJECTED DRAFT ---",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Generates a cold-outreach draft using Claude via forced tool use.
+ *
+ * Branches on `input.channel` (defaults to "email" when omitted):
+ *   - "email": UNCHANGED from before this field existed — same SYSTEM_PROMPT,
+ *     same `email_draft` tool schema, same validation (empty subject AND empty
+ *     body both throw).
+ *   - "facebook" | "instagram" | "phone": a channel-specific system prompt and
+ *     a separate `message_draft` tool whose schema requires only `body` (no
+ *     subject field at all — asking for one and discarding it would waste
+ *     tokens and risk the model leaking email framing into the body). Returns
+ *     `{ subject: "", body }`; only the empty-body check runs (the email
+ *     path's empty-subject check would always throw here, since there is no
+ *     subject to fill).
  */
 export async function generateEmailDraft(
   input: DraftInput
 ): Promise<{ subject: string; body: string }> {
   const client = getClient();
+  const channel = input.channel ?? "email";
+
+  if (channel === "email") {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      tools: [
+        {
+          name: "email_draft",
+          description:
+            "Return the generated cold outreach email as structured JSON with subject and body fields.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              subject: {
+                type: "string",
+                description: "The email subject line.",
+              },
+              body: {
+                type: "string",
+                description:
+                  "The plain-text email body. Paragraphs separated by blank lines (\\n\\n). No HTML or markdown.",
+              },
+            },
+            required: ["subject", "body"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "email_draft" },
+      messages: [{ role: "user", content: buildUserMessage(input) }],
+    });
+
+    // Extract the tool_use block from Claude's response
+    const toolBlock = response.content.find((b) => b.type === "tool_use");
+    if (!toolBlock || toolBlock.type !== "tool_use") {
+      throw new Error(
+        `generateEmailDraft: expected a tool_use block from Claude but received: ${JSON.stringify(response.content)}`
+      );
+    }
+
+    const input_data = toolBlock.input as Record<string, unknown>;
+    const subject =
+      typeof input_data.subject === "string" ? input_data.subject.trim() : "";
+    const body =
+      typeof input_data.body === "string" ? input_data.body.trim() : "";
+
+    if (!subject) {
+      throw new Error(
+        "generateEmailDraft: Claude returned an empty subject. Check the prompt or model output."
+      );
+    }
+    if (!body) {
+      throw new Error(
+        "generateEmailDraft: Claude returned an empty body. Check the prompt or model output."
+      );
+    }
+
+    return { subject, body };
+  }
+
+  // Non-email channels: facebook / instagram / phone.
+  const systemPrompt =
+    channel === "phone" ? PHONE_SCRIPT_SYSTEM_PROMPT : SOCIAL_DM_SYSTEM_PROMPT;
 
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     tools: [
       {
-        name: "email_draft",
+        name: "message_draft",
         description:
-          "Return the generated cold outreach email as structured JSON with subject and body fields.",
+          channel === "phone"
+            ? "Return the generated phone call opening script as structured JSON with a body field."
+            : "Return the generated Facebook/Instagram DM as structured JSON with a body field.",
         input_schema: {
           type: "object" as const,
           properties: {
-            subject: {
-              type: "string",
-              description: "The email subject line.",
-            },
             body: {
               type: "string",
               description:
-                "The plain-text email body. Paragraphs separated by blank lines (\\n\\n). No HTML or markdown.",
+                channel === "phone"
+                  ? "The plain-text call script the user will read aloud. No email formatting."
+                  : "The plain-text DM body. No subject line, no salutation block, no email sign-off.",
             },
           },
-          required: ["subject", "body"],
+          required: ["body"],
           additionalProperties: false,
         },
       },
     ],
-    tool_choice: { type: "tool", name: "email_draft" },
-    messages: [{ role: "user", content: buildUserMessage(input) }],
+    tool_choice: { type: "tool", name: "message_draft" },
+    messages: [
+      {
+        role: "user",
+        content: buildChannelUserMessage({ ...input, channel }),
+      },
+    ],
   });
 
-  // Extract the tool_use block from Claude's response
   const toolBlock = response.content.find((b) => b.type === "tool_use");
   if (!toolBlock || toolBlock.type !== "tool_use") {
     throw new Error(
@@ -160,23 +359,16 @@ export async function generateEmailDraft(
   }
 
   const input_data = toolBlock.input as Record<string, unknown>;
-  const subject =
-    typeof input_data.subject === "string" ? input_data.subject.trim() : "";
   const body =
     typeof input_data.body === "string" ? input_data.body.trim() : "";
 
-  if (!subject) {
-    throw new Error(
-      "generateEmailDraft: Claude returned an empty subject. Check the prompt or model output."
-    );
-  }
   if (!body) {
     throw new Error(
       "generateEmailDraft: Claude returned an empty body. Check the prompt or model output."
     );
   }
 
-  return { subject, body };
+  return { subject: "", body };
 }
 
 // Plain-text → HTML rendering lives in tracking.ts (`renderTrackedHtml`).
