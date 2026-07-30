@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseScraperCsv, buildScraperKeyPoints, deriveChannel, ScraperRow } from "@/lib/scraperCsv";
+import {
+  parseScraperCsv,
+  buildScraperKeyPoints,
+  deriveChannel,
+  parseRecentReviewDays,
+  ScraperRow,
+} from "@/lib/scraperCsv";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,8 +67,15 @@ function makeScraperCsv(headers: string[], rows: string[][]): string {
   ].join("\n");
 }
 
-/** A full, realistic 29-column data row matching SCRAPER_HEADERS order. */
-function fullDataRow(overrides: Record<string, string> = {}): string[] {
+/**
+ * A full, realistic data row. Defaults to the 29-column SCRAPER_HEADERS
+ * order; pass `headers: SCRAPER_HEADERS_V31` (via overrides handling below)
+ * to build a 31-column row instead.
+ */
+function fullDataRow(
+  overrides: Record<string, string> = {},
+  headers: string[] = SCRAPER_HEADERS
+): string[] {
   const defaults: Record<string, string> = {
     name: "Sunrise Cafe",
     web_presence_tier: "SOCIAL_ONLY",
@@ -71,6 +84,8 @@ function fullDataRow(overrides: Record<string, string> = {}): string[] {
     rating: "4.5",
     review_count: "1234",
     recent_review: "Great coffee and friendly staff, will come back again soon",
+    recent_review_days: "",
+    recent_review_text: "",
     category: "Cafe",
     price: "$$",
     open_status: "Open",
@@ -95,7 +110,7 @@ function fullDataRow(overrides: Record<string, string> = {}): string[] {
     enrich_error: "",
   };
   const merged = { ...defaults, ...overrides };
-  return SCRAPER_HEADERS.map((h) => merged[h] ?? "");
+  return headers.map((h) => merged[h] ?? "");
 }
 
 function baseRow(overrides: Partial<ScraperRow> = {}): ScraperRow {
@@ -106,6 +121,8 @@ function baseRow(overrides: Partial<ScraperRow> = {}): ScraperRow {
     rating: "",
     reviewCount: "",
     recentReview: "",
+    recentReviewText: "",
+    recentReviewDays: "",
     webPresenceTier: "",
     claimed: "",
     fullAddress: "",
@@ -119,6 +136,19 @@ function baseRow(overrides: Partial<ScraperRow> = {}): ScraperRow {
     ...overrides,
   };
 }
+
+/**
+ * The 31-column headers, i.e. SCRAPER_HEADERS plus the 2026-07-30 additions,
+ * inserted in the same position as the real export (right after
+ * `recent_review`, before `category`).
+ */
+const RECENT_REVIEW_IDX = SCRAPER_HEADERS.indexOf("recent_review");
+const SCRAPER_HEADERS_V31 = [
+  ...SCRAPER_HEADERS.slice(0, RECENT_REVIEW_IDX + 1),
+  "recent_review_days",
+  "recent_review_text",
+  ...SCRAPER_HEADERS.slice(RECENT_REVIEW_IDX + 1),
+];
 
 // ---------------------------------------------------------------------------
 // parseScraperCsv
@@ -170,6 +200,42 @@ describe("parseScraperCsv — happy path", () => {
     expect(errors).toHaveLength(0);
     expect(rows[0].businessName).toBe("Sunrise Cafe");
     expect(rows[0].facebook).toBe("https://facebook.com/sunrisecafe");
+  });
+});
+
+describe("parseScraperCsv — 31-column export (recent_review_days / recent_review_text)", () => {
+  it("parses the two new columns when present", () => {
+    const csv = makeScraperCsv(
+      SCRAPER_HEADERS_V31,
+      [
+        fullDataRow(
+          {
+            name: "Cafe Carolina",
+            recent_review: "5 days ago",
+            recent_review_days: "5",
+            recent_review_text: "Great Beef Tapa, super flavorful.",
+          },
+          SCRAPER_HEADERS_V31
+        ),
+      ]
+    );
+    const { rows, errors } = parseScraperCsv(csv);
+    expect(errors).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].recentReviewDays).toBe("5");
+    expect(rows[0].recentReviewText).toBe("Great Beef Tapa, super flavorful.");
+  });
+
+  it("back-compat: an old 29-column CSV (no new headers) still parses fine, new fields default to empty string", () => {
+    const csv = makeScraperCsv(SCRAPER_HEADERS, [
+      fullDataRow({ name: "Legacy Cafe", recent_review: "3 weeks ago" }),
+    ]);
+    const { rows, errors } = parseScraperCsv(csv);
+    expect(errors).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].businessName).toBe("Legacy Cafe");
+    expect(rows[0].recentReviewText).toBe("");
+    expect(rows[0].recentReviewDays).toBe("");
   });
 });
 
@@ -376,6 +442,133 @@ describe("buildScraperKeyPoints", () => {
       expect(result).toBe("Mystery Cafe");
       expect(result.length).toBeGreaterThan(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildScraperKeyPoints — recent_review_text (2026-07-30)
+// ---------------------------------------------------------------------------
+
+describe("buildScraperKeyPoints — recentReviewText preference", () => {
+  it("uses real review prose from the actual export when recentReviewText is populated, even though recentReview is a relative-date phrase", () => {
+    // Row 7 of the real 2026-07-30 export (Quadros Cafe and Resto Bar).
+    const row = baseRow({
+      businessName: "Quadros Cafe and Resto Bar",
+      category: "Coffee shop",
+      recentReview: "a year ago",
+      recentReviewText:
+        "A hidden gem. While I didn't get to try their food, the coffee is acceptable. Nothing special, it was good for its price. …",
+    });
+    const result = buildScraperKeyPoints(row);
+    expect(result).toContain(
+      'recent review: "A hidden gem. While I didn\'t get to try their food, the coffee is acceptable. Nothing special, it was good for its price."'
+    );
+    // The relative-date recentReview must never leak into prose.
+    expect(result).not.toMatch(/a year ago/i);
+  });
+
+  it("omits the segment entirely when recentReviewText is blank and recentReview is only a relative-date age (real-export shape: 9 of 16 rows have no captured review text)", () => {
+    // Row 6 of the real export (ALU Garden Tagaytay): recent_review="a day ago", recent_review_text="".
+    const row = baseRow({
+      businessName: "ALU Garden Tagaytay",
+      category: "Cafe",
+      recentReview: "a day ago",
+      recentReviewText: "",
+    });
+    const result = buildScraperKeyPoints(row);
+    expect(result).not.toMatch(/recent review/i);
+  });
+
+  it("strips a trailing single-character ellipsis (U+2026) left over from Maps' own truncation", () => {
+    // Row 14 of the real export (Caja Fika).
+    const row = baseRow({
+      businessName: "Caja Fika",
+      category: "Cafe",
+      recentReviewText: "affordable and worth it 💘 …",
+    });
+    const result = buildScraperKeyPoints(row);
+    expect(result).toContain('recent review: "affordable and worth it 💘"');
+    expect(result).not.toContain("…");
+  });
+
+  it("strips a trailing literal three-dot ellipsis (\"...\") the same way", () => {
+    const row = baseRow({
+      category: "Cafe",
+      recentReviewText: "Worth a stop, cozy vibe...",
+    });
+    const result = buildScraperKeyPoints(row);
+    expect(result).toContain('recent review: "Worth a stop, cozy vibe"');
+    expect(result).not.toContain("...");
+  });
+
+  it("truncates emoji-containing review text without splitting a surrogate pair (code-point safe)", () => {
+    // Construct a string where a naive UTF-16 `.slice(0, 140)` lands exactly
+    // inside the emoji's surrogate pair, to prove the fix is real and not
+    // coincidentally safe.
+    const prefix = "a".repeat(139); // 139 code units, all BMP, no spaces
+    const emoji = "\u{1F600}"; // 😀 — astral, encoded as a surrogate pair
+    const suffix = "b".repeat(50); // push well past the 140-char limit
+    const text = prefix + emoji + suffix;
+
+    // Sanity check: naive slicing really does break this input.
+    const naiveSlice = text.slice(0, 140);
+    const lastUnit = naiveSlice.charCodeAt(naiveSlice.length - 1);
+    expect(lastUnit).toBeGreaterThanOrEqual(0xd800);
+    expect(lastUnit).toBeLessThanOrEqual(0xdbff); // lone high surrogate = broken
+
+    const row = baseRow({ category: "Cafe", recentReviewText: text });
+    const result = buildScraperKeyPoints(row);
+
+    // No unpaired surrogate (i.e. no split emoji) anywhere in the output.
+    const hasLoneSurrogate =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result);
+    expect(hasLoneSurrogate).toBe(false);
+    expect(result).toContain(emoji);
+  });
+
+  it("keeps the existing recentReview fallback (relative-date) behaviour when recentReviewText is absent (back-compat)", () => {
+    const row = baseRow({
+      category: "Cafe",
+      recentReview: "Great coffee, visited a month ago",
+      recentReviewText: "",
+    });
+    const result = buildScraperKeyPoints(row);
+    expect(result).toContain('recent review: "Great coffee, visited a month ago"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseRecentReviewDays
+// ---------------------------------------------------------------------------
+
+describe("parseRecentReviewDays", () => {
+  it('parses "365" to 365', () => {
+    expect(parseRecentReviewDays("365")).toBe(365);
+  });
+
+  it('parses "0" to 0 — NOT dropped as falsy (a review posted today is meaningful)', () => {
+    expect(parseRecentReviewDays("0")).toBe(0);
+  });
+
+  it("returns undefined for an empty string", () => {
+    expect(parseRecentReviewDays("")).toBeUndefined();
+  });
+
+  it("returns undefined for non-numeric junk", () => {
+    expect(parseRecentReviewDays("abc")).toBeUndefined();
+  });
+
+  it("returns undefined for a negative number", () => {
+    expect(parseRecentReviewDays("-5")).toBeUndefined();
+  });
+
+  it("returns undefined for NaN/Infinity-producing input", () => {
+    expect(parseRecentReviewDays("NaN")).toBeUndefined();
+    expect(parseRecentReviewDays("Infinity")).toBeUndefined();
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(parseRecentReviewDays("  21  ")).toBe(21);
   });
 });
 

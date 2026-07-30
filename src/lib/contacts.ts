@@ -30,6 +30,7 @@ export interface CreateContactInput {
   sourcePlaceId?: string;
   webPresenceTier?: string;
   claimed?: string;
+  recentReviewDays?: number;
 }
 
 export type CreateContactResult =
@@ -190,6 +191,10 @@ export async function createContactChecked(
     ...(input.sourcePlaceId ? { sourcePlaceId: input.sourcePlaceId } : {}),
     ...(input.webPresenceTier ? { webPresenceTier: input.webPresenceTier } : {}),
     ...(input.claimed ? { claimed: input.claimed } : {}),
+    // NOT the truthiness pattern used above: 0 is a valid, meaningful day
+    // count (review posted today) and is falsy, so `input.x ? {...} : {}`
+    // would silently drop it. Explicit undefined-check instead.
+    ...(input.recentReviewDays !== undefined ? { recentReviewDays: input.recentReviewDays } : {}),
     nextSendAt: new Date(),
     unsubscribeToken: randomUUID(),
   });

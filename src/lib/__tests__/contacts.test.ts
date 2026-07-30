@@ -256,3 +256,78 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// recentReviewDays (2026-07-30): 0 is meaningful and must not be dropped by
+// a truthiness check on insert, unlike the sibling optional string fields.
+// ---------------------------------------------------------------------------
+
+describe("createContactChecked — recentReviewDays", () => {
+  it("includes recentReviewDays: 0 in the Contact.create call (0 is NOT falsy-dropped)", async () => {
+    (Contact.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockLean(null));
+    (Contact.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _id: "new-2",
+      businessName: "Fresh Review Cafe",
+    });
+
+    await createContactChecked(
+      {
+        businessName: "Fresh Review Cafe",
+        keyPoints: "kp",
+        campaignId: "campaign-1",
+        outreachChannel: "facebook",
+        facebook: "https://facebook.com/freshreviewcafe",
+        recentReviewDays: 0,
+      },
+      "csv"
+    );
+
+    const createArg = (Contact.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(createArg.recentReviewDays).toBe(0);
+  });
+
+  it("omits recentReviewDays entirely when undefined (no bogus 0/null written)", async () => {
+    (Contact.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockLean(null));
+    (Contact.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _id: "new-3",
+      businessName: "Unknown Age Cafe",
+    });
+
+    await createContactChecked(
+      {
+        businessName: "Unknown Age Cafe",
+        keyPoints: "kp",
+        campaignId: "campaign-1",
+        outreachChannel: "phone",
+        phone: "09171234567",
+      },
+      "csv"
+    );
+
+    const createArg = (Contact.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect("recentReviewDays" in createArg).toBe(false);
+  });
+
+  it("preserves a positive recentReviewDays value", async () => {
+    (Contact.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockLean(null));
+    (Contact.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _id: "new-4",
+      businessName: "Old Review Cafe",
+    });
+
+    await createContactChecked(
+      {
+        businessName: "Old Review Cafe",
+        keyPoints: "kp",
+        campaignId: "campaign-1",
+        outreachChannel: "instagram",
+        instagram: "@oldreviewcafe",
+        recentReviewDays: 365,
+      },
+      "csv"
+    );
+
+    const createArg = (Contact.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(createArg.recentReviewDays).toBe(365);
+  });
+});

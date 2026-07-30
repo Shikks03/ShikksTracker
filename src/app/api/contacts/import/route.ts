@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Campaign from "@/models/Campaign";
 import { parseContactsCsv } from "@/lib/csv";
-import { parseScraperCsv, buildScraperKeyPoints, deriveChannel } from "@/lib/scraperCsv";
+import {
+  parseScraperCsv,
+  buildScraperKeyPoints,
+  deriveChannel,
+  parseRecentReviewDays,
+} from "@/lib/scraperCsv";
 import { createContactChecked, normalizeEmail } from "@/lib/contacts";
 import { handleError } from "@/lib/api";
 
@@ -275,6 +280,7 @@ async function handleScraperImport(
         sourcePlaceId: row.placeId,
         webPresenceTier: row.webPresenceTier,
         claimed: row.claimed,
+        recentReviewDays: parseRecentReviewDays(row.recentReviewDays),
       },
       "csv"
     );

@@ -23,6 +23,10 @@ export interface ScraperRow {
   rating: string;
   reviewCount: string;
   recentReview: string;
+  /** Prose of the most recent visible review, or "" when the scraper didn't capture one (`recent_review_text`). NEW 2026-07-30. */
+  recentReviewText: string;
+  /** The `recentReview` age expressed as a whole number of days (string form), or "" when unknown (`recent_review_days`). NEW 2026-07-30. */
+  recentReviewDays: string;
   webPresenceTier: string;
   claimed: string;
   fullAddress: string;
@@ -105,6 +109,8 @@ export function parseScraperCsv(csvText: string): {
       rating: getField(row, "rating"),
       reviewCount: getField(row, "review_count"),
       recentReview: getField(row, "recent_review"),
+      recentReviewText: getField(row, "recent_review_text"),
+      recentReviewDays: getField(row, "recent_review_days"),
       webPresenceTier: getField(row, "web_presence_tier"),
       claimed: getField(row, "claimed"),
       fullAddress: getField(row, "full_address"),
@@ -200,13 +206,37 @@ function isRelativeDateOnly(text: string): boolean {
   return STANDALONE_PHRASES.has(normalized);
 }
 
-/** Truncate to at most `maxLen` chars on a word boundary, appending "…" if cut. */
+/**
+ * Truncate to at most `maxLen` chars on a word boundary, appending "…" if cut.
+ *
+ * Code-point-safe: real scraped review text contains emoji (✨🤍💗) which are
+ * astral characters encoded as UTF-16 surrogate pairs. `String.prototype.slice`
+ * counts UTF-16 code units, so a naive `text.slice(0, maxLen)` can land inside
+ * a surrogate pair and split it, producing a lone unpaired surrogate that
+ * renders as U+FFFD (�). Operating over `Array.from(text)` iterates by Unicode
+ * code point instead, so an emoji always counts — and gets cut — as one unit.
+ */
 function truncateOnWordBoundary(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  const slice = text.slice(0, maxLen);
+  const chars = Array.from(text);
+  if (chars.length <= maxLen) return text;
+  const slice = chars.slice(0, maxLen).join("");
   const lastSpace = slice.lastIndexOf(" ");
   const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice;
   return `${cut}…`;
+}
+
+/**
+ * Strip a trailing ellipsis left over from Google Maps' own review
+ * truncation — either the single "…" (U+2026) character or a literal "...",
+ * plus any whitespace it leaves dangling at the end. Real exports end with
+ * a pattern like `"...it was good for its price. …"`; without this,
+ * `recent review: "...price. …"` reads badly in the AI prompt.
+ */
+function stripTrailingEllipsis(text: string): string {
+  return text
+    .trimEnd()
+    .replace(/(?:\.\.\.|…)\s*$/u, "")
+    .trimEnd();
 }
 
 /**
@@ -260,21 +290,49 @@ export function buildScraperKeyPoints(row: ScraperRow): string {
 
   // 5. Recent review
   //
-  // GOTCHA: the scraper's `recent_review` column often actually holds the
-  // review's RELATIVE-DATE timestamp element (e.g. "2 years ago", "a month
-  // ago"), not the review text — an upstream scraping artifact, not real
-  // prose. Embedding that verbatim let the AI drafter reason about it and
-  // produce a real, damaging cold open ("it looks like your last customer
-  // review was posted around two years ago"). So: omit the segment entirely
-  // when the value is nothing but a relative-date phrase. Do NOT "restore"
-  // this for tidiness — it is intentional. Genuine prose that happens to
-  // mention a relative date (e.g. "Great coffee, visited a month ago") is
-  // still kept, since isRelativeDateOnly anchors to the whole string.
-  if (row.recentReview) {
+  // `recent_review_text` (added 2026-07-30) is the actual prose of the most
+  // recent review that was ALREADY VISIBLE in the Maps panel. The scraper
+  // deliberately performs no extra clicks, scrolling or requests, so a blank
+  // is the normal, expected outcome whenever no review body happened to be
+  // rendered — a real 16-row export had it populated on 7 rows. Blank is not
+  // an error and must never be treated as one. When present, prefer it.
+  //
+  // GOTCHA (pre-existing, still load-bearing): the older `recent_review`
+  // column often actually holds the review's RELATIVE-DATE timestamp element
+  // (e.g. "2 years ago", "a month ago"), not review text — an upstream
+  // scraping artifact, not real prose. Embedding that verbatim let the AI
+  // drafter reason about it and produce a real, damaging cold open ("it
+  // looks like your last customer review was posted around two years ago").
+  // So: when `recentReviewText` is blank, fall back to `recentReview` but
+  // omit the segment entirely when that value is nothing but a
+  // relative-date phrase. Do NOT "restore" this for tidiness — it is
+  // intentional. Genuine prose that happens to mention a relative date
+  // (e.g. "Great coffee, visited a month ago") is still kept, since
+  // isRelativeDateOnly anchors to the whole string.
+  //
+  // DELIBERATE OMISSION: `recentReviewDays` never feeds a keyPoints segment,
+  // and neither does any "last reviewed X ago" phrasing derived from
+  // `recentReview`'s relative-date value. Google Maps sorts reviews by
+  // relevance, not recency, so the freshest *visible* review is NOT provably
+  // the newest — any such phrase in keyPoints invites the AI drafter to
+  // assert exactly the false "your last review was X ago" claim this whole
+  // change exists to prevent. `recentReviewDays` is persisted on the Contact
+  // for prospecting/filtering only; it must never reach the AI prompt.
+  const reviewTextCandidate = collapseWhitespace(row.recentReviewText || "");
+  if (reviewTextCandidate) {
+    const stripped = stripTrailingEllipsis(reviewTextCandidate);
+    if (stripped) {
+      const truncated = truncateOnWordBoundary(stripped, RECENT_REVIEW_MAX_LEN);
+      segments.push(`recent review: "${truncated}"`);
+    }
+  } else if (row.recentReview) {
     const collapsed = collapseWhitespace(row.recentReview);
     if (!isRelativeDateOnly(collapsed)) {
-      const truncated = truncateOnWordBoundary(collapsed, RECENT_REVIEW_MAX_LEN);
-      segments.push(`recent review: "${truncated}"`);
+      const stripped = stripTrailingEllipsis(collapsed);
+      if (stripped) {
+        const truncated = truncateOnWordBoundary(stripped, RECENT_REVIEW_MAX_LEN);
+        segments.push(`recent review: "${truncated}"`);
+      }
     }
   }
 
@@ -283,6 +341,30 @@ export function buildScraperKeyPoints(row: ScraperRow): string {
   }
 
   return segments.join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// parseRecentReviewDays
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the scraper's `recent_review_days` string field into a whole number
+ * of days for persistence on Contact.recentReviewDays, or `undefined` when
+ * the value can't be trusted.
+ *
+ * Deliberately permissive input, strict output: empty string (scraper found
+ * no age), non-numeric junk, NaN, negative numbers, and non-finite values all
+ * fall back to `undefined` rather than throwing or storing a bogus number —
+ * import must never fail because of this optional signal. `0` is a valid,
+ * meaningful result (review posted today) and is preserved, not treated as
+ * falsy/missing.
+ */
+export function parseRecentReviewDays(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || Number.isNaN(n) || n < 0) return undefined;
+  return n;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,12 @@ export interface IContact extends Document {
   sourcePlaceId?: string;
   webPresenceTier?: string;
   claimed?: string;
+  /**
+   * The scraped `recent_review`'s age in whole days, captured at import time
+   * (2026-07-30). Prospecting/filtering signal only — never fed into AI
+   * prompts (see scraperCsv.ts's DELIBERATE OMISSION note). No index/UI yet.
+   */
+  recentReviewDays?: number;
   status: "active" | "paused" | "replied" | "bounced" | "unsubscribed";
   /** 0=not started, 1=initial sent, 2=followup1 sent, 3=followup2 sent */
   currentStage: number;
@@ -76,6 +82,7 @@ const ContactSchema = new Schema<IContact>(
     sourcePlaceId: { type: String },
     webPresenceTier: { type: String },
     claimed: { type: String },
+    recentReviewDays: { type: Number },
     status: {
       type: String,
       enum: ["active", "paused", "replied", "bounced", "unsubscribed"],
