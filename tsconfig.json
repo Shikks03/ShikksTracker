@@ -6,6 +6,11 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // Permits the explicit ".ts" extension that Node's --experimental-strip-types
+    // REQUIRES on relative imports (scripts/sync-indexes.mts imports the Contact
+    // model directly). Only legal because noEmit is true. App code does not use
+    // extensioned imports; this just stops tsc rejecting the one script that must.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

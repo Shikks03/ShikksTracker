@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate:indexes": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/sync-indexes.mts",
+    "migrate:indexes:apply": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/sync-indexes.mts --apply"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
