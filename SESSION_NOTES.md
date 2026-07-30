@@ -97,14 +97,40 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   **Not verified live:** no `/outreach` run against a real DB, and AI drafting for the new
   channels is unexercised — per the project's skip-credential-gated convention, covered by
   unit tests only.
-  **⚠ DEPLOY-TIME MIGRATION (must happen before the first scraper import):** two Contact
-  indexes changed shape. Mongoose does **not** drop and rebuild a redefined index on an
-  existing collection, so the live Atlas DB still carries the old plain-unique
-  `{contactEmail, campaignId}` index, which will **reject every email-less contact**. Run
-  `Contact.syncIndexes()` once against production (or drop the two old indexes manually in
-  Atlas and let the app rebuild them). Verify afterwards that
-  `{contactEmail, campaignId}` and `{sourcePlaceId, campaignId}` both show a
-  `partialFilterExpression`.
+  **⚠ INDEX MIGRATION (must happen before the first scraper import):** two Contact indexes
+  changed shape. Mongoose only *creates missing* indexes — it never alters or drops one that
+  already exists under the same name — so the live Atlas DB still carries the old
+  plain-unique `{contactEmail, campaignId}`. Under it a missing field is indexed as null, so
+  the FIRST email-less contact inserts fine and every later one fails E11000: a 200-row
+  scraper import would land exactly one contact.
+  Run **`npm run migrate:indexes`** (dry run — prints the current indexes and the planned
+  diff, changes nothing), then **`npm run migrate:indexes:apply`**. The apply path verifies
+  both indexes ended up partial and non-sparse, and exits non-zero if not. Dry-run is the
+  default deliberately: `syncIndexes()` drops ANY index not declared in the schema.
+  **Note this is not only a deploy-time step** — `.env.local` almost certainly points at the
+  same Atlas cluster, so it is a prerequisite for testing locally too.
+
+- **2026-07-30** — **Multi-channel branch reviewed + hardened.** Three follow-up commits on
+  the same branch. `39221d8`: the manual compose paths never stamped `channel`, so composing
+  for a scraped Facebook contact produced an email-channel log that `sendOneLog` rejected and
+  silently reverted to draft — it never sent and never reached `/outreach`. Subject is now
+  required only when an email recipient is involved, and the board shows approved logs too
+  (compose creates them as approved; the approve gate is meaningless for a hand-sent channel).
+  `b71eb47`: fixes for **7 findings from an independent Codex review** — a dashboard/contact
+  crash on any contact with neither name nor email (the first scraped contact would have hit
+  it; client types wrongly declared `contactEmail` required, which is why tsc never caught
+  it); `suppressContact` upserting a Suppression keyed on an undefined email; mark-sent
+  stranding a contact if the post-claim advance failed (now a retryable repair rather than a
+  409, which also heals already-stranded contacts); `advanceContactAfterSend` regressing
+  concurrent higher stages (now guarded on `currentStage: { $lt: log.stage }`) and
+  mis-anchoring spacing when stage-1 history is missing (now relative); legacy channel-less
+  logs vanishing from `/review` while cron still sent them; case-sensitive businessName
+  dedupe; and non-email ids consuming the send-batch limit. `0ad6fdb`: the migration script
+  above. Tests 396 → 445. **Every one of these was a DB-semantics or null-data bug — none
+  was reachable by the test suite, which has no DB layer.** Two caveats accepted rather than
+  fixed: the businessName dedupe fix is lookup-only (a concurrent double-insert can still
+  race; a full fix needs a stored normalized key plus a partial index), and `/api/send-batch`
+  still silently omits ids it cannot send.
 
 - **2026-07-04** — Project bootstrapped: SPEC.md copied in, CLAUDE.md and SESSION_NOTES.md created, spec open questions resolved by interview (see Decisions Locked). No code yet.
 - **2026-07-04 (later)** — Post-build fixes: HTML-escaped CSV-derived fields in the takeover alert email (security review finding, 715544a); fixed dashboard crash `campaigns.map is not a function` when the campaigns API returns an error object instead of an array — guarded the two unchecked fetches on `/` and `/import` (c1e218d). User has started running the app locally; next session continues from the "Pending user actions" list above (DB → Gmail OAuth → Anthropic key → deploy → pinger → warm-up batch).
