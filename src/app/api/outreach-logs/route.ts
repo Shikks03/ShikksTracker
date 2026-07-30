@@ -5,8 +5,8 @@ import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
 import {
   NON_EMAIL_CHANNEL_QUERY,
-  VALID_OUTREACH_LOG_STATUSES,
   isNonEmailChannel,
+  resolveOutreachLogStatusFilter,
 } from "@/lib/outreachLogs";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,16 @@ export const dynamic = "force-dynamic";
  * render a contact link/summary without an N+1 query per row.
  *
  * Query params:
- *   status     optional, default "draft" — one of draft/approved/sending/sent
+ *   status     optional — one of draft/approved/sending/sent. When omitted,
+ *              defaults to BOTH "draft" and "approved" (see
+ *              resolveOutreachLogStatusFilter / DEFAULT_OUTREACH_LOG_STATUSES
+ *              in src/lib/outreachLogs.ts): the review-before-send gate that
+ *              distinguishes those two statuses only matters for the
+ *              automated Gmail path — a facebook/instagram/phone touch is
+ *              sent by hand regardless of which of the two it's in, so the
+ *              board must show both or a composed-and-approved social
+ *              message would never appear. Supplying `?status=` explicitly
+ *              still matches that single status exactly, unchanged.
  *   channel    optional — one of facebook/instagram/phone (narrows further
  *              than the baseline non-email filter)
  *   campaignId optional — scope to one campaign
@@ -36,15 +45,13 @@ export async function GET(request: NextRequest) {
     await connectDB();
     const { searchParams } = request.nextUrl;
 
-    const status = searchParams.get("status") ?? "draft";
+    const statusParam = searchParams.get("status");
     const channel = searchParams.get("channel");
     const campaignId = searchParams.get("campaignId");
 
-    if (!VALID_OUTREACH_LOG_STATUSES.has(status)) {
-      return NextResponse.json(
-        { error: `Invalid status: ${status}. Must be one of: draft, approved, sending, sent.` },
-        { status: 400 }
-      );
+    const statusResult = resolveOutreachLogStatusFilter(statusParam);
+    if (!statusResult.ok) {
+      return NextResponse.json({ error: statusResult.error }, { status: statusResult.httpStatus });
     }
 
     if (channel && !isNonEmailChannel(channel)) {
@@ -54,7 +61,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const filter: Record<string, unknown> = { status };
+    const filter: Record<string, unknown> = { ...statusResult.filter };
     // A specific channel narrows the match to exactly that value; otherwise
     // fall back to the baseline "any non-email channel" predicate. Both
     // branches exclude email (and legacy channel-less) logs.

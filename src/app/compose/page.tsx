@@ -8,6 +8,7 @@ import {
   FOREST_ACTION as FOREST,
 } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
+import { isSubjectRequiredForChannels } from "@/lib/outreachLogs";
 
 interface CampaignItem {
   _id: string;
@@ -20,6 +21,7 @@ interface ContactItem {
   contactEmail: string;
   contactName?: string;
   currentStage: number;
+  outreachChannel?: string;
 }
 
 interface BatchResult {
@@ -115,6 +117,16 @@ export default function ComposePage() {
 
   const allChecked = contacts.length > 0 && checkedIds.size === contacts.length;
 
+  // Only `contacts` (active, checkable) recipients can be checked —
+  // `repliedContacts` checkboxes are disabled — so this is the full set of
+  // channels the batch will actually contain. A subject is required only if
+  // at least one checked recipient is on the email channel (legacy null/
+  // undefined channel counts as email — see isSubjectRequiredForChannel).
+  const checkedChannels = contacts
+    .filter((c) => checkedIds.has(c._id))
+    .map((c) => c.outreachChannel);
+  const subjectRequired = isSubjectRequiredForChannels(checkedChannels);
+
   function toggleAll() {
     if (allChecked) setCheckedIds(new Set());
     else setCheckedIds(new Set(contacts.map((c) => c._id)));
@@ -162,7 +174,7 @@ export default function ComposePage() {
     const errs: Record<string, string> = {};
     if (!campaignId)          errs.campaign = "Select a campaign";
     if (checkedIds.size === 0) errs.recipients = "Select at least one recipient";
-    if (!subject.trim())      errs.subject = "Subject is required";
+    if (subjectRequired && !subject.trim()) errs.subject = "Subject is required";
     if (!body.trim())         errs.body = "Body is required";
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
@@ -424,7 +436,9 @@ export default function ComposePage() {
 
             {/* Subject */}
             <div style={{ marginBottom: 22 }}>
-              <label style={labelStyle}>Subject</label>
+              <label style={labelStyle}>
+                Subject{!subjectRequired && " (optional — no email recipients selected)"}
+              </label>
               <input
                 type="text"
                 value={subject}

@@ -31,6 +31,93 @@ export const NON_EMAIL_CHANNEL_QUERY: { channel: { $in: readonly NonEmailChannel
 export const VALID_OUTREACH_LOG_STATUSES = new Set(["draft", "approved", "sending", "sent"]);
 
 /**
+ * Default status set for GET /api/outreach-logs when `?status=` is omitted.
+ *
+ * The review-before-send gate ("draft" vs "approved") exists so a human can
+ * check AI-drafted text before Gmail auto-sends it. For facebook/instagram/
+ * phone that gate is meaningless — there is no auto-send; the human reads
+ * the message as they paste it onto the platform by hand. So the board must
+ * surface both "draft" AND "approved" non-email logs by default, or a
+ * composed-and-approved social message (see the two manual compose routes)
+ * would be invisible on the board forever.
+ */
+export const DEFAULT_OUTREACH_LOG_STATUSES = ["draft", "approved"] as const;
+
+export type OutreachLogStatusFilterResult =
+  | { ok: true; filter: { status: string } | { status: { $in: readonly string[] } } }
+  | { ok: false; httpStatus: 400; error: string };
+
+/**
+ * Resolves the `status` Mongo filter for GET /api/outreach-logs from the raw
+ * `?status=` query param.
+ *
+ *  - Absent (`null`) → both "draft" and "approved" (see
+ *    DEFAULT_OUTREACH_LOG_STATUSES above).
+ *  - Present → validated against VALID_OUTREACH_LOG_STATUSES and matched
+ *    exactly (today's behaviour, unchanged) — an explicit `?status=sent`
+ *    means sent, not "sent or approved".
+ *  - Present but invalid → 400, same message the route returned before this
+ *    was extracted.
+ *
+ * Pure and DB-free so the filter shape is unit-testable without mocking
+ * Mongoose, matching NON_EMAIL_CHANNEL_QUERY / checkMarkSentAllowed above.
+ */
+export function resolveOutreachLogStatusFilter(
+  status: string | null
+): OutreachLogStatusFilterResult {
+  if (status == null) {
+    return { ok: true, filter: { status: { $in: DEFAULT_OUTREACH_LOG_STATUSES } } };
+  }
+
+  if (!VALID_OUTREACH_LOG_STATUSES.has(status)) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      error: `Invalid status: ${status}. Must be one of: draft, approved, sending, sent.`,
+    };
+  }
+
+  return { ok: true, filter: { status } };
+}
+
+/**
+ * Whether a `subject` is required for a log/contact on the given channel.
+ *
+ * The EmailLog schema requires `subject` only when `channel === "email"`
+ * (see src/models/EmailLog.ts). Facebook/Instagram DMs and phone scripts
+ * have no subject line at all. Legacy channel-less values are treated as
+ * email (`isNonEmailChannel` returns false for null/undefined), matching the
+ * convention documented on that function.
+ */
+export function isSubjectRequiredForChannel(
+  channel: string | null | undefined
+): boolean {
+  return !isNonEmailChannel(channel);
+}
+
+/**
+ * Whether a `subject` is required for a batch of logs/contacts spanning the
+ * given channels — used by POST /api/email-logs/batch and the /compose
+ * multi-select form, where a single submission can mix email and
+ * facebook/instagram/phone recipients.
+ *
+ * Rule: required if AND ONLY IF at least one channel in the list requires a
+ * subject per `isSubjectRequiredForChannel` (i.e. at least one email — or
+ * legacy null/undefined, which counts as email — recipient is present). An
+ * all-non-email selection allows an empty subject through.
+ *
+ * Empty-selection edge case: returns `false` (not required). An empty list
+ * has no email recipient to require a subject for, so there is nothing to
+ * block on subject grounds — the caller's separate "at least one recipient"
+ * validation is responsible for rejecting an empty selection outright.
+ */
+export function isSubjectRequiredForChannels(
+  channels: ReadonlyArray<string | null | undefined>
+): boolean {
+  return channels.some((channel) => isSubjectRequiredForChannel(channel));
+}
+
+/**
  * Returns true when `channel` is a valid non-email channel value — used to
  * validate the optional `?channel=` query param on GET /api/outreach-logs,
  * and (as the inverse) to guard POST /api/outreach-logs/[id]/mark-sent.

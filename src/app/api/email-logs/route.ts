@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
+import { isSubjectRequiredForChannel } from "@/lib/outreachLogs";
 
 export const dynamic = "force-dynamic";
 
@@ -48,9 +49,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (stage !== 1 && stage !== 2 && stage !== 3) {
       return NextResponse.json({ error: "stage must be 1, 2, or 3" }, { status: 400 });
     }
-    if (!subject || typeof subject !== "string" || !subject.trim()) {
-      return NextResponse.json({ error: "subject is required" }, { status: 400 });
-    }
     if (!emailBody || typeof emailBody !== "string" || !emailBody.trim()) {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
@@ -58,6 +56,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const contact = await Contact.findById(contactId).lean();
     if (!contact) {
       return NextResponse.json({ error: `Contact not found: ${contactId}` }, { status: 404 });
+    }
+
+    // Legacy contacts saved before outreachChannel existed fall back to
+    // "email" — same convention as isNonEmailChannel/EMAIL_CHANNEL_QUERY.
+    const channel = contact.outreachChannel ?? "email";
+
+    // The channel isn't known until the contact loads, so this check can't
+    // run alongside the contactId/stage/body checks above. Facebook/
+    // Instagram DMs and phone scripts have no subject line — the EmailLog
+    // schema itself only requires `subject` when channel === "email".
+    if (
+      isSubjectRequiredForChannel(channel) &&
+      (!subject || typeof subject !== "string" || !subject.trim())
+    ) {
+      return NextResponse.json({ error: "subject is required" }, { status: 400 });
     }
 
     const existing = await EmailLog.findOne({
@@ -77,9 +90,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contactId: contact._id,
       campaignId: contact.campaignId,
       stage,
-      subject: (subject as string).trim(),
+      subject: typeof subject === "string" ? subject.trim() : "",
       body: (emailBody as string).trim(),
       status: "approved",
+      channel,
     });
 
     return NextResponse.json(log, { status: 201 });

@@ -14,6 +14,10 @@ import {
   isNonEmailChannel,
   checkMarkSentAllowed,
   VALID_OUTREACH_LOG_STATUSES,
+  DEFAULT_OUTREACH_LOG_STATUSES,
+  resolveOutreachLogStatusFilter,
+  isSubjectRequiredForChannel,
+  isSubjectRequiredForChannels,
 } from "@/lib/outreachLogs";
 
 // ---------------------------------------------------------------------------
@@ -162,5 +166,119 @@ describe("checkMarkSentAllowed", () => {
       expect(nullResult.ok).toBe(false);
       if (!nullResult.ok) expect(nullResult.httpStatus).toBe(400);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveOutreachLogStatusFilter — the status filter for GET /api/outreach-logs
+// ---------------------------------------------------------------------------
+
+describe("resolveOutreachLogStatusFilter", () => {
+  it("defaults to both draft and approved when status is absent (null)", () => {
+    const result = resolveOutreachLogStatusFilter(null);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filter).toEqual({ status: { $in: DEFAULT_OUTREACH_LOG_STATUSES } });
+      expect([...(result.filter as { status: { $in: readonly string[] } }).status.$in].sort()).toEqual(
+        ["approved", "draft"]
+      );
+    }
+  });
+
+  it("matches exactly 'sent' when status=sent is supplied (not 'sent or approved')", () => {
+    const result = resolveOutreachLogStatusFilter("sent");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filter).toEqual({ status: "sent" });
+    }
+  });
+
+  it("matches exactly 'draft' when status=draft is supplied explicitly", () => {
+    const result = resolveOutreachLogStatusFilter("draft");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filter).toEqual({ status: "draft" });
+    }
+  });
+
+  it("matches exactly 'approved' when status=approved is supplied explicitly", () => {
+    const result = resolveOutreachLogStatusFilter("approved");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filter).toEqual({ status: "approved" });
+    }
+  });
+
+  it("matches exactly 'sending' when status=sending is supplied explicitly", () => {
+    const result = resolveOutreachLogStatusFilter("sending");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filter).toEqual({ status: "sending" });
+    }
+  });
+
+  it("400s on an invalid status", () => {
+    const result = resolveOutreachLogStatusFilter("bogus");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.httpStatus).toBe(400);
+      expect(result.error).toMatch(/invalid status/i);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSubjectRequiredForChannel — conditional subject rule for POST /api/email-logs
+// ---------------------------------------------------------------------------
+
+describe("isSubjectRequiredForChannel", () => {
+  it("requires a subject for email", () => {
+    expect(isSubjectRequiredForChannel("email")).toBe(true);
+  });
+
+  it("requires a subject for a legacy channel-less contact/log (treated as email)", () => {
+    expect(isSubjectRequiredForChannel(null)).toBe(true);
+    expect(isSubjectRequiredForChannel(undefined)).toBe(true);
+  });
+
+  it("does not require a subject for facebook, instagram, or phone", () => {
+    expect(isSubjectRequiredForChannel("facebook")).toBe(false);
+    expect(isSubjectRequiredForChannel("instagram")).toBe(false);
+    expect(isSubjectRequiredForChannel("phone")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSubjectRequiredForChannels — batch-level version for POST
+// /api/email-logs/batch and the /compose multi-select form, where a single
+// submission can mix email and facebook/instagram/phone recipients.
+// ---------------------------------------------------------------------------
+
+describe("isSubjectRequiredForChannels", () => {
+  it("does not require a subject when every channel is non-email", () => {
+    expect(isSubjectRequiredForChannels(["facebook", "instagram", "phone"])).toBe(false);
+  });
+
+  it("requires a subject when the selection mixes one email contact in with non-email ones", () => {
+    expect(isSubjectRequiredForChannels(["facebook", "email", "phone"])).toBe(true);
+  });
+
+  it("requires a subject when every channel is email", () => {
+    expect(isSubjectRequiredForChannels(["email", "email"])).toBe(true);
+  });
+
+  it("requires a subject when the selection contains a legacy null/undefined channel (treated as email)", () => {
+    expect(isSubjectRequiredForChannels(["facebook", null])).toBe(true);
+    expect(isSubjectRequiredForChannels(["facebook", undefined])).toBe(true);
+  });
+
+  // Empty-selection edge case: an empty list has no email recipient to
+  // require a subject for, so this returns false ("not required"). It is
+  // the caller's separate "select at least one recipient" validation that
+  // rejects an empty selection outright — this helper never sees that case
+  // in practice because both call sites (POST /api/email-logs/batch and
+  // /compose's validate()) check recipient count first.
+  it("does not require a subject for an empty channel list", () => {
+    expect(isSubjectRequiredForChannels([])).toBe(false);
   });
 });

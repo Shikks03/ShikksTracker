@@ -8,9 +8,10 @@ import { apiFetch } from "@/lib/client";
 import { normalizeHandleUrl, telHref, type Channel } from "@/lib/channels";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-// Mirrors the GET /api/outreach-logs?status=draft contract (Phase 4, built in
-// parallel). The board only ever shows non-email channels — email is fully
-// automated and lives in the Review Queue instead.
+// Mirrors the GET /api/outreach-logs contract (Phase 4, built in parallel;
+// defaults to both draft and approved logs — see resolveOutreachLogStatusFilter
+// in src/lib/outreachLogs.ts). The board only ever shows non-email channels —
+// email is fully automated and lives in the Review Queue instead.
 
 interface OutreachContact {
   _id: string;
@@ -83,7 +84,7 @@ export default function OutreachPage() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await apiFetch<OutreachLogItem[]>("/api/outreach-logs?status=draft");
+    const { data, error: err } = await apiFetch<OutreachLogItem[]>("/api/outreach-logs");
     setLoading(false);
     if (err) { setError(err); return; }
     setLogs(Array.isArray(data) ? data : []);

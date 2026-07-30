@@ -3,6 +3,8 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
+import { isSubjectRequiredForChannels } from "@/lib/outreachLogs";
+import { isValidObjectId } from "mongoose";
 
 export const dynamic = "force-dynamic";
 
@@ -24,22 +26,51 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
-    if (!subject || typeof subject !== "string" || !subject.trim()) {
-      return NextResponse.json({ error: "subject is required" }, { status: 400 });
-    }
     if (!emailBody || typeof emailBody !== "string" || !emailBody.trim()) {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 
-    const subjectTemplate = (subject as string).trim();
+    const subjectTrimmed = typeof subject === "string" ? subject.trim() : "";
     const bodyTemplate = (emailBody as string).trim();
+
+    // Single pre-load instead of a per-contact findById in the loop below:
+    // removes the N+1 and gives us every selected contact's channel up front,
+    // which the subject requirement (a property of the whole batch, not a
+    // single contact) needs before the loop can run.
+    //
+    // Only well-formed ObjectIds go into the $in: an unparseable id would make
+    // the whole query throw a CastError, which handleError turns into a 400 for
+    // the ENTIRE batch. Before the pre-load this route did findById per contact
+    // inside the per-contact try/catch, so one malformed id only cost that one
+    // contact. Filtering here preserves that: a malformed id simply misses the
+    // map and is reported as "contact not found" alongside the others.
+    const validIds = (contactIds as unknown[]).filter(
+      (id): id is string => typeof id === "string" && isValidObjectId(id)
+    );
+    const contacts = await Contact.find({ _id: { $in: validIds } }).lean();
+    const contactsById = new Map(contacts.map((c) => [String(c._id), c]));
+
+    // A subject is required iff at least one resolved contact is on the
+    // email channel (legacy null/undefined channel counts as email — see
+    // isSubjectRequiredForChannel). Contacts that don't resolve to a real
+    // document are reported via `skipped` in the loop below and don't
+    // factor into this decision.
+    const resolvedChannels = contactIds
+      .map((id) => contactsById.get(String(id)))
+      .filter((c): c is NonNullable<typeof c> => c != null)
+      .map((c) => c.outreachChannel);
+    if (isSubjectRequiredForChannels(resolvedChannels) && !subjectTrimmed) {
+      return NextResponse.json({ error: "subject is required" }, { status: 400 });
+    }
+
+    const subjectTemplate = subjectTrimmed;
 
     let created = 0;
     const skipped: SkippedItem[] = [];
 
     for (const id of contactIds) {
       try {
-        const contact = await Contact.findById(id as string).lean();
+        const contact = contactsById.get(String(id));
         if (!contact) {
           skipped.push({ businessName: String(id), reason: "contact not found" });
           continue;
@@ -88,6 +119,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           subject: subjectTemplate,
           body: bodyTemplate,
           status: "approved",
+          // Legacy contacts saved before outreachChannel existed fall back
+          // to "email" — same convention as isNonEmailChannel/EMAIL_CHANNEL_QUERY.
+          channel: contact.outreachChannel ?? "email",
         });
 
         created++;
