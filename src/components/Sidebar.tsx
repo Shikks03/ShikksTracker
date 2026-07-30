@@ -31,7 +31,10 @@ export default function Sidebar() {
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch("/api/email-logs?status=draft");
+        // channel=email: the badge sits on "Review Queue", and /review lists
+        // EMAIL drafts only — an unfiltered fetch here counts social/phone
+        // drafts too and over-states the badge relative to what /review shows.
+        const res = await fetch("/api/email-logs?status=draft&channel=email");
         if (!res.ok || cancelled) return;
         const data: unknown = await res.json();
         if (!cancelled && Array.isArray(data)) {

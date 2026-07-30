@@ -407,14 +407,17 @@ export default function Dashboard() {
       else if (error) setConfigError(`Couldn't load campaigns — ${error}`);
     });
 
-    apiFetch<{ length: number }[]>("/api/email-logs?status=draft").then(
+    // channel=email: this tile/header links to and mirrors /review, which
+    // lists EMAIL drafts only — an unfiltered count would include social/
+    // phone drafts that never appear in that queue.
+    apiFetch<{ length: number }[]>("/api/email-logs?status=draft&channel=email").then(
       ({ data, error }) => {
         if (Array.isArray(data)) setDraftCount(data.length);
         else if (error) setConfigError(`Couldn't load draft count — ${error}`);
       }
     );
 
-    apiFetch<{ length: number }[]>("/api/email-logs?status=approved").then(
+    apiFetch<{ length: number }[]>("/api/email-logs?status=approved&channel=email").then(
       ({ data, error }) => {
         if (Array.isArray(data)) setApprovedCount(data.length);
         else if (error) setConfigError(`Couldn't load approved count — ${error}`);

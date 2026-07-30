@@ -317,6 +317,66 @@ describe("buildScraperKeyPoints", () => {
     const row = baseRow({ businessName: "Mystery Shop", category: "" });
     expect(buildScraperKeyPoints(row)).toBe("Mystery Shop");
   });
+
+  // Regression: the scraper's `recent_review` column frequently holds a
+  // relative-date timestamp element ("2 years ago"), not review text. Feeding
+  // that to the AI verbatim produced a real, damaging cold open ("it looks
+  // like your last customer review was posted around two years ago"), so the
+  // segment must be omitted entirely rather than quoted as if it were prose.
+  describe("omits the recent-review segment for relative-date-only values", () => {
+    const relativeDateValues = [
+      "a month ago",
+      "22 days ago",
+      "2 years ago",
+      "a day ago",
+      "3 days ago",
+      "an hour ago",
+      "a week ago",
+      "1 minute ago",
+      "yesterday",
+      "today",
+      "just now",
+      "a moment ago",
+      "a while ago",
+      "recently",
+    ];
+
+    for (const value of relativeDateValues) {
+      it(`omits the segment for "${value}"`, () => {
+        const row = baseRow({ category: "Cafe", recentReview: value });
+        const result = buildScraperKeyPoints(row);
+        expect(result).not.toMatch(/recent review/i);
+      });
+    }
+
+    it("is case-insensitive and tolerant of surrounding/internal whitespace", () => {
+      const row = baseRow({ category: "Cafe", recentReview: "  2  YEARS   AGO  " });
+      const result = buildScraperKeyPoints(row);
+      expect(result).not.toMatch(/recent review/i);
+    });
+
+    it("keeps genuine prose that happens to contain a relative date", () => {
+      const row = baseRow({
+        category: "Cafe",
+        recentReview: "Great coffee, visited a month ago",
+      });
+      const result = buildScraperKeyPoints(row);
+      expect(result).toContain('recent review: "Great coffee, visited a month ago"');
+    });
+
+    it("still omits the segment when recentReview is empty", () => {
+      const row = baseRow({ category: "Cafe", recentReview: "" });
+      const result = buildScraperKeyPoints(row);
+      expect(result).not.toMatch(/recent review/i);
+    });
+
+    it("never returns an empty string when the only populated field is a relative-date recentReview", () => {
+      const row = baseRow({ businessName: "Mystery Cafe", category: "", recentReview: "2 years ago" });
+      const result = buildScraperKeyPoints(row);
+      expect(result).toBe("Mystery Cafe");
+      expect(result.length).toBeGreaterThan(0);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

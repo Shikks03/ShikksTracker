@@ -73,10 +73,14 @@ export function compactHandle(handle: string, channel?: string): string {
   if (!trimmed) return "";
   if (channel === "phone") return trimmed;
 
-  // Drop scheme, query and hash, then the known social domains.
+  // Drop scheme, query and hash, then the known social domains. The scraper
+  // regularly emits "web.facebook.com" (mobile-web crawl) alongside the plain
+  // domain, and occasionally "m."/"mobile."/"business." variants — an
+  // explicit alternation (not a generic `[a-z]+\.` wildcard, which would
+  // over-match unrelated hosts) keeps those recognised too.
   const withoutScheme = trimmed.replace(/^https?:\/\//i, "").replace(/[?#].*$/, "");
   const withoutDomain = withoutScheme.replace(
-    /^(www\.)?(facebook|fb|instagram)\.(com|me)\//i,
+    /^(www\.|web\.|m\.|mobile\.|business\.)?(facebook|fb|instagram)\.(com|me)\//i,
     ""
   );
 

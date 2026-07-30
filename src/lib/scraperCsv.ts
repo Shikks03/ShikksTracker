@@ -175,6 +175,31 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * A relative-date phrase like "2 years ago" or "yesterday", and NOTHING else.
+ * Anchored to the whole string (`^...$`) so genuine review prose that happens
+ * to mention a relative date (e.g. "Great coffee, visited a month ago") is
+ * NOT matched — only a value that is purely a timestamp phrase.
+ */
+function isRelativeDateOnly(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const RELATIVE_DATE_RE =
+    /^(?:a|an|\d+)\s+(?:second|minute|hour|day|week|month|year)s?\s+ago$/;
+  if (RELATIVE_DATE_RE.test(normalized)) return true;
+
+  const STANDALONE_PHRASES = new Set([
+    "yesterday",
+    "today",
+    "just now",
+    "a moment ago",
+    "a while ago",
+    "recently",
+  ]);
+  return STANDALONE_PHRASES.has(normalized);
+}
+
 /** Truncate to at most `maxLen` chars on a word boundary, appending "…" if cut. */
 function truncateOnWordBoundary(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
@@ -234,10 +259,23 @@ export function buildScraperKeyPoints(row: ScraperRow): string {
   }
 
   // 5. Recent review
+  //
+  // GOTCHA: the scraper's `recent_review` column often actually holds the
+  // review's RELATIVE-DATE timestamp element (e.g. "2 years ago", "a month
+  // ago"), not the review text — an upstream scraping artifact, not real
+  // prose. Embedding that verbatim let the AI drafter reason about it and
+  // produce a real, damaging cold open ("it looks like your last customer
+  // review was posted around two years ago"). So: omit the segment entirely
+  // when the value is nothing but a relative-date phrase. Do NOT "restore"
+  // this for tidiness — it is intentional. Genuine prose that happens to
+  // mention a relative date (e.g. "Great coffee, visited a month ago") is
+  // still kept, since isRelativeDateOnly anchors to the whole string.
   if (row.recentReview) {
     const collapsed = collapseWhitespace(row.recentReview);
-    const truncated = truncateOnWordBoundary(collapsed, RECENT_REVIEW_MAX_LEN);
-    segments.push(`recent review: "${truncated}"`);
+    if (!isRelativeDateOnly(collapsed)) {
+      const truncated = truncateOnWordBoundary(collapsed, RECENT_REVIEW_MAX_LEN);
+      segments.push(`recent review: "${truncated}"`);
+    }
   }
 
   if (segments.length === 0) {

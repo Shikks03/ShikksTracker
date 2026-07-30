@@ -126,6 +126,38 @@ describe("compactHandle", () => {
     expect(compactHandle("Maria Santos", "facebook")).toBe("Maria Santos");
     expect(compactHandle("", "facebook")).toBe("");
   });
+
+  // Regression: the scraper regularly emits "web.facebook.com" URLs (2 of 6
+  // facebook rows in a real export). Only "www." was tolerated before, so
+  // these fell through to the bare hostname and rendered as "@WEB.FACEBOOK.COM".
+  it("strips the web.facebook.com host prefix", () => {
+    expect(compactHandle("https://web.facebook.com/tiyomontanscafe", "facebook")).toBe(
+      "@tiyomontanscafe"
+    );
+  });
+
+  it("still returns \"\" for a web.facebook.com profile.php URL (identity lives in the stripped query string)", () => {
+    expect(
+      compactHandle(
+        "https://web.facebook.com/profile.php?id=100072345464446",
+        "facebook"
+      )
+    ).toBe("");
+  });
+
+  it("strips the m.facebook.com host prefix", () => {
+    expect(compactHandle("https://m.facebook.com/somepage", "facebook")).toBe("@somepage");
+  });
+
+  it("still strips the plain www. prefix (no regression)", () => {
+    expect(compactHandle("https://www.facebook.com/cafebytheruins", "facebook")).toBe(
+      "@cafebytheruins"
+    );
+  });
+
+  it("still handles a bare handle with no domain at all (no regression)", () => {
+    expect(compactHandle("@sunrisedental_ph", "instagram")).toBe("@sunrisedental_ph");
+  });
 });
 
 describe("displayIdentity", () => {
