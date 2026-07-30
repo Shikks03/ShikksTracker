@@ -135,9 +135,15 @@ No multi-user support, no A/B testing, no Gmail push notifications (polling only
 
 All 14 build phases are code-complete (2026-07-04), plus a full "Editorial Terminal" UI
 redesign (07-05) and a manual compose/send feature set (07-06/07). **Not yet deployed**;
-credentials (Mongo verified, Gmail OAuth verified, Anthropic key pending), Vercel deploy,
-and the hourly pinger are pending user actions (SESSION_NOTES.md "Pending user actions").
-There are no tests. Live end-to-end behavior (tracking, replies, drafts) is unverified.
+Vercel deploy and the hourly pinger are still pending user actions (SESSION_NOTES.md
+"Pending user actions"). Credentials are all in place and exercised: Mongo verified,
+Gmail OAuth verified, and `ANTHROPIC_API_KEY` verified live 2026-07-30 (drafting ran for
+email, phone and Facebook). There are 468 vitest unit tests over the pure lib layer.
+Live end-to-end behavior verified 2026-07-30 for the **draft + manual-send** path
+(scraper import → AI draft → `/outreach` → mark sent, with correct stage/pipeline/
+`nextSendAt` advance). Still unverified live: Gmail **auto-send**, open/click tracking and
+reply detection — these need a public `APP_BASE_URL` and the pinger, so they remain
+blocked on deploy (see the tracking/replies note under Known constraints).
 
 ## Versions (package.json)
 
@@ -320,11 +326,21 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
 - Docs drift: mostly reconciled through 2026-07-11 (README scoring is +1/+3/+10,
   "regenerate" removed, `/compose` listed). Treat code as truth, SPEC.md for intent,
   SESSION_NOTES.md for the change narrative.
-- **Multi-channel (2026-07-29):** `/outreach` and the scraper import have **not been run
-  against a live DB**, and AI drafting for the social/phone prompts is unexercised (no
-  `ANTHROPIC_API_KEY` at build time) — unit tests only, per the skip-credential-gated
-  convention. The **index migration in SESSION_NOTES.md must be run before the first
-  scraper import** or every email-less contact will be rejected by the stale unique index.
+- **Multi-channel (verified live 2026-07-30):** ~~not run against a live DB~~ **the whole
+  scraper→import→draft→mark-sent path is now verified end to end against the real Atlas
+  cluster**, and channel-specific AI drafting has run for real. **The index migration is
+  DONE** (`contactEmail_1_campaignId_1` is partial-unique on the live DB; a real 20-row
+  import inserted 14/14 email-less contacts). Do not re-run `migrate:indexes:apply`
+  routinely — it is idempotent but `syncIndexes()` drops anything not in the schema.
+  Note the live database is named **`test`** (the URI has no db in its path, so the driver
+  default applies to both the script and `src/lib/db.ts`).
+  Three real-data bugs were found and fixed in `8dff223` — see the 2026-07-30 (later)
+  SESSION_NOTES entry. **Still open by design:** `deriveChannel` ignores `website`, so a
+  lead with a live site but no phone/socials cannot be imported at all; phone/DM drafts
+  contain literal `[Your Name]`/`[Your Company]` (no sender identity feeds those prompts);
+  the locality heuristic can emit fragments like "Brgy-based Cafe". **Upstream, unfixed:**
+  the scraper's `recent_review` column captures the review's relative-date timestamp, not
+  its text — ShikksTracker now defends against it, but the fix belongs in the scraper repo.
   Manual replies on social/phone have no detection — the user moves the pipeline stage by
   hand; the Gmail reply/alert engine stays email-only. Known future work: `EmailLog` is
   misnamed now that it carries social/phone logs (a rename to `OutreachLog` was

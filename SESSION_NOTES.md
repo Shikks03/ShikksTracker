@@ -132,6 +132,55 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   race; a full fix needs a stored normalized key plus a partial index), and `/api/send-batch`
   still silently omits ids it cannot send.
 
+- **2026-07-30 (later)** — **First live-database run of the multi-channel feature.** The
+  index migration is DONE and the whole scraper→outreach path is verified end to end
+  against the real Atlas cluster. Commit `8dff223`.
+  **Migration applied:** `npm run migrate:indexes` dry run showed exactly two planned
+  changes (DROP + CREATE `contactEmail_1_campaignId_1`); `sourcePlaceId_1_campaignId_1`
+  already existed and was already partial, because Mongoose auto-creates *missing*
+  indexes on startup. Nothing hand-made in Atlas was at risk — every other live index
+  mapped 1:1 to a schema declaration. Applied; verification passed. **Note the DB is
+  named `test`** — the URI has no database in its path, so both the script and
+  `src/lib/db.ts` land on the driver default. Production will use the same one.
+  **Import proof:** a real 20-row export imported **14 inserted / 0 duplicates / 6
+  invalid**. Under the old plain-unique index exactly ONE would have inserted and the
+  other 13 would have failed E11000 — so this is direct confirmation the migration did
+  its job. The UTF-8 BOM was really present in the file and stripped correctly.
+  **Walkthrough:** channel-specific AI drafting ran for the first time (4 email / 4 phone
+  / 2 facebook; phone + DM drafts correctly subject-less). `/outreach` showed exactly the
+  6 social drafts. Mark-sent produced exactly the right state: stage 0→1,
+  not_started→contacted, `nextSendAt = sentAt + 5.000 days` (= `spacing[1]`),
+  `sentManuallyAt` set, and **every Gmail field null** — Gmail untouched. Email path
+  unaffected: `/review` showed exactly the 4 email drafts, dashboard rendered 20 contacts
+  including nameless/email-less ones without the crash Codex had found, and the engine
+  correctly refused to send at 18:30 Manila ("outside send window").
+  **Three findings, all needing real data to surface (fixed in `8dff223`):**
+  (a) the scraper's `recent_review` column holds the review's **relative-date timestamp**
+  ("2 years ago"), not the review text — on every row. Fed to the drafter it produced a
+  factually wrong, damaging cold open ("your last customer review was posted around two
+  years ago"). `buildScraperKeyPoints` now omits the segment when the value is only a
+  relative-date phrase; genuine prose mentioning a date is still kept. **The upstream
+  scraper bug is still unfixed — it lives in the separate scraper repo
+  (`panelRecentReview` grabbing the timestamp element).**
+  (b) the Review Queue badge counted ALL drafts but links to the email-only `/review`
+  (read 9, queue held 4); the callers now pass `channel=email` (the API already
+  supported it).
+  (c) `compactHandle` didn't strip `web.facebook.com`, so the hostname became the handle
+  ("@WEB.FACEBOOK.COM"). Display only — the outbound link was always right.
+  **Deliberately NOT fixed (design decisions, still open):** `deriveChannel` ignores
+  `website`, so website-only leads are silently unimportable (a real lead with a live
+  site and no phone/socials was among the 6 skipped rows); phone/DM drafts contain
+  literal `[Your Name]`/`[Your Company]` because no sender identity feeds those prompts,
+  so every script needs hand-editing; and the locality heuristic emits fragments like
+  "Brgy-based Cafe" when a house number is mistaken for a postal code.
+  **Data state:** the 14 real Amadeo cafe leads were KEPT. `keyPoints` for 13 of them was
+  recomputed with the fixed builder and their 5 stale drafts deleted so they regenerate
+  cleanly; AMADEO ARTISANO (used for the mark-sent test) was reset to stage 0 /
+  not_started with its false "sent" log removed, since no message was ever actually sent
+  to that business. Also confirmed: the unsubscribe line is appended at **send** time
+  (`sequence.ts`), which is why drafts correctly lack one — not a compliance gap.
+  Tests 445 → 468; tsc and build clean.
+
 - **2026-07-04** — Project bootstrapped: SPEC.md copied in, CLAUDE.md and SESSION_NOTES.md created, spec open questions resolved by interview (see Decisions Locked). No code yet.
 - **2026-07-04 (later)** — Post-build fixes: HTML-escaped CSV-derived fields in the takeover alert email (security review finding, 715544a); fixed dashboard crash `campaigns.map is not a function` when the campaigns API returns an error object instead of an array — guarded the two unchecked fetches on `/` and `/import` (c1e218d). User has started running the app locally; next session continues from the "Pending user actions" list above (DB → Gmail OAuth → Anthropic key → deploy → pinger → warm-up batch).
 - **2026-07-04** — All 14 phases implemented in one session (Sonnet implementer subagents, per-phase spec+quality review by coordinator). Notable review catches fixed along the way: failed-connection caching in db.ts, literal `To: me` header in test-send, draft-cap starvation + approved-queue head-of-line blocking in the sequence engine, campaignId ObjectId cast in the stats aggregation. Everything verified via tsc + production build (27 routes); anything needing live credentials is deferred to the user actions above.
