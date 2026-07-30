@@ -22,7 +22,7 @@ import type { Mock } from "vitest";
 // ---------------------------------------------------------------------------
 
 vi.mock("@/models/Contact", () => ({
-  default: { findByIdAndUpdate: vi.fn() },
+  default: { findOneAndUpdate: vi.fn() },
 }));
 vi.mock("@/models/EmailLog", () => ({
   default: { findOne: vi.fn() },
@@ -36,6 +36,7 @@ import {
   isWithinSendWindow,
   getManilaDayStart,
   computeNextSendAt,
+  computeRelativeNextSendAt,
   isStaleSending,
   advanceContactAfterSend,
   EMAIL_CHANNEL_QUERY,
@@ -280,7 +281,9 @@ describe("advanceContactAfterSend", () => {
   const CAMPAIGN_ID = "campaign123";
 
   beforeEach(() => {
-    vi.mocked(Contact.findByIdAndUpdate).mockReset().mockResolvedValue(undefined);
+    // Default: the guarded update matches (truthy result = "applied"). Tests
+    // exercising the no-op path override this with mockResolvedValueOnce(null).
+    vi.mocked(Contact.findOneAndUpdate).mockReset().mockResolvedValue({});
     vi.mocked(EmailLog.findOne).mockReset();
     vi.mocked(Campaign.findById).mockReset();
   });
@@ -294,10 +297,13 @@ describe("advanceContactAfterSend", () => {
     const sentAt = new Date("2026-07-01T00:00:00Z");
     const campaign = { sequenceSpacingDays: [0, 5, 9] };
 
-    await advanceContactAfterSend(contact, log, sentAt, campaign);
+    const result = await advanceContactAfterSend(contact, log, sentAt, campaign);
 
-    expect(Contact.findByIdAndUpdate).toHaveBeenCalledTimes(1);
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    expect(result).toEqual({ applied: true });
+    expect(Contact.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    const [filter, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
+    // Monotonic guard: the write is conditioned on currentStage < log.stage.
+    expect(filter).toMatchObject({ _id: CONTACT_ID, currentStage: { $lt: 1 } });
     expect(update).toMatchObject({ currentStage: 1, pipelineStage: "contacted" });
     // stage 1 -> next stage 2 -> spacingDays[1] = 5 days from firstSentAt (= sentAt)
     expect((update.nextSendAt as Date).toISOString()).toBe("2026-07-06T00:00:00.000Z");
@@ -316,12 +322,12 @@ describe("advanceContactAfterSend", () => {
 
     await advanceContactAfterSend(contact, log, sentAt, campaign);
 
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    const [, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
     expect(update).not.toHaveProperty("pipelineStage");
     expect(update.currentStage).toBe(1);
   });
 
-  it("stage 2: computes nextSendAt from the stage-1 log's sentAt, not the stage-2 send time", async () => {
+  it("stage 2: computes nextSendAt from the stage-1 log's sentAt, not the stage-2 send time (in-order, regression guard)", async () => {
     const contact = {
       _id: CONTACT_ID,
       pipelineStage: "contacted",
@@ -335,11 +341,14 @@ describe("advanceContactAfterSend", () => {
       select: () => ({ lean: () => Promise.resolve({ sentAt: stage1SentAt }) }),
     });
 
-    await advanceContactAfterSend(contact, log, stage2SentAt, campaign);
+    const result = await advanceContactAfterSend(contact, log, stage2SentAt, campaign);
 
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    expect(result).toEqual({ applied: true });
+    const [filter, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
+    expect(filter).toMatchObject({ _id: CONTACT_ID, currentStage: { $lt: 2 } });
     expect(update.currentStage).toBe(2);
     // stage 2 -> next stage 3 -> spacingDays[2] = 9 days from stage1SentAt (NOT stage2SentAt)
+    // Absolute anchoring is UNCHANGED from before the fix whenever a stage-1 log exists.
     expect((update.nextSendAt as Date).toISOString()).toBe("2026-07-10T00:00:00.000Z");
   });
 
@@ -352,15 +361,15 @@ describe("advanceContactAfterSend", () => {
     const sentAt = new Date("2026-07-15T00:00:00Z");
     const campaign = { sequenceSpacingDays: [0, 5, 9] };
 
-    (EmailLog.findOne as unknown as Mock).mockReturnValueOnce({
-      select: () => ({ lean: () => Promise.resolve({ sentAt: new Date("2026-07-01T00:00:00Z") }) }),
-    });
+    const result = await advanceContactAfterSend(contact, log, sentAt, campaign);
 
-    await advanceContactAfterSend(contact, log, sentAt, campaign);
-
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    expect(result).toEqual({ applied: true });
+    const [filter, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
+    expect(filter).toMatchObject({ _id: CONTACT_ID, currentStage: { $lt: 3 } });
     expect(update.currentStage).toBe(3);
     expect(update.nextSendAt).toBeNull();
+    // stage 3 has no "next stage" to anchor, so it never needs the stage-1 lookup.
+    expect(EmailLog.findOne).not.toHaveBeenCalled();
   });
 
   it("a contact already past 'not_started' is not regressed at stage 2 either", async () => {
@@ -378,7 +387,7 @@ describe("advanceContactAfterSend", () => {
 
     await advanceContactAfterSend(contact, log, sentAt, campaign);
 
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    const [, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
     expect(update).not.toHaveProperty("pipelineStage");
   });
 
@@ -397,7 +406,7 @@ describe("advanceContactAfterSend", () => {
     await advanceContactAfterSend(contact, log, sentAt);
 
     expect(Campaign.findById).toHaveBeenCalledWith(CAMPAIGN_ID);
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    const [, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
     // stage 1 -> next stage 2 -> spacingDays[1] = 7 days from sentAt
     expect((update.nextSendAt as Date).toISOString()).toBe("2026-07-08T00:00:00.000Z");
   });
@@ -416,8 +425,101 @@ describe("advanceContactAfterSend", () => {
 
     await advanceContactAfterSend(contact, log, sentAt);
 
-    const [, update] = (Contact.findByIdAndUpdate as unknown as Mock).mock.calls[0];
+    const [, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
     expect((update.nextSendAt as Date).toISOString()).toBe("2026-07-06T00:00:00.000Z");
+  });
+
+  // -------------------------------------------------------------------------
+  // Monotonic guard (Bug 2a): the conditional update is a no-op, not an
+  // error, when the contact's currentStage is already >= log.stage — this is
+  // what prevents a slow/out-of-order lower-stage request from clobbering a
+  // higher stage a faster/concurrent request already wrote.
+  // -------------------------------------------------------------------------
+
+  it("returns applied:false (no-op) when the guarded Contact update finds no match", async () => {
+    (Contact.findOneAndUpdate as unknown as Mock).mockResolvedValueOnce(null);
+
+    const contact = {
+      _id: CONTACT_ID,
+      pipelineStage: "contacted",
+    } as unknown as IContact;
+    // Simulates a stage-1 mark arriving late after a stage-3 log already advanced
+    // the contact to currentStage 3 in the DB (the mock returning null stands in
+    // for "no document matched currentStage < 1").
+    const log = { stage: 1, campaignId: CAMPAIGN_ID } as unknown as IEmailLog;
+    const sentAt = new Date("2026-07-01T00:00:00Z");
+    const campaign = { sequenceSpacingDays: [0, 5, 9] };
+
+    const result = await advanceContactAfterSend(contact, log, sentAt, campaign);
+
+    expect(result.applied).toBe(false);
+    if (!result.applied) {
+      expect(result.reason).toMatch(/no-op/i);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Missing stage-1-anchor fallback (Bug 2b): a stage-2 (or higher) log sent
+  // with no stage-1 `sent` log to anchor to must use RELATIVE spacing from
+  // THIS send, not the wrong absolute offset.
+  // -------------------------------------------------------------------------
+
+  it("stage 2 with NO stage-1 log: schedules stage 3 using relative spacing (4 days with [0,5,9]), not absolute 9 days", async () => {
+    const contact = {
+      _id: CONTACT_ID,
+      pipelineStage: "contacted",
+    } as unknown as IContact;
+    const log = { stage: 2, campaignId: CAMPAIGN_ID } as unknown as IEmailLog;
+    const sentAt = new Date("2026-07-10T00:00:00Z");
+    const campaign = { sequenceSpacingDays: [0, 5, 9] };
+
+    (EmailLog.findOne as unknown as Mock).mockReturnValueOnce({
+      select: () => ({ lean: () => Promise.resolve(null) }), // no stage-1 sent log
+    });
+
+    await advanceContactAfterSend(contact, log, sentAt, campaign);
+
+    const [, update] = (Contact.findOneAndUpdate as unknown as Mock).mock.calls[0];
+    // 9 - 5 = 4 days from sentAt, NOT 9 days (which the old absolute-fallback bug produced)
+    expect((update.nextSendAt as Date).toISOString()).toBe("2026-07-14T00:00:00.000Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeRelativeNextSendAt — the missing-stage-1-anchor fallback helper
+// ---------------------------------------------------------------------------
+
+describe("computeRelativeNextSendAt", () => {
+  const sentAt = new Date("2026-07-10T00:00:00Z");
+
+  it("computes the 5->9 gap (4 days) for a stage-2 send with no stage-1 anchor, default [0,5,9] spacing", () => {
+    const result = computeRelativeNextSendAt(sentAt, [0, 5, 9], 2, 3);
+    expect(result.toISOString()).toBe("2026-07-14T00:00:00.000Z");
+  });
+
+  it("respects custom spacing values", () => {
+    // [0, 7, 14]: stage2->3 gap = 14 - 7 = 7 days
+    const result = computeRelativeNextSendAt(sentAt, [0, 7, 14], 2, 3);
+    expect(result.toISOString()).toBe("2026-07-17T00:00:00.000Z");
+  });
+
+  it("falls back to canonical day offsets for a short/malformed spacing array (no NaN)", () => {
+    // Empty array: both indices missing -> fallback 5 (stage2), 9 (stage3) -> gap 4
+    const result = computeRelativeNextSendAt(sentAt, [], 2, 3);
+    expect(Number.isNaN(result.getTime())).toBe(false);
+    expect(result.toISOString()).toBe("2026-07-14T00:00:00.000Z");
+  });
+
+  it("falls back to canonical day offsets when only the earlier index is missing", () => {
+    // [0]: index 1 (stage 2) missing -> fallback 5; index 2 (stage 3) present -> 9 -> gap 4
+    const result = computeRelativeNextSendAt(sentAt, [0], 2, 3);
+    expect(result.toISOString()).toBe("2026-07-14T00:00:00.000Z");
+  });
+
+  it("clamps a negative interval to 0 days (send immediately) rather than going negative", () => {
+    // Malformed/out-of-order spacing: stage 2 configured AFTER stage 3's offset.
+    const result = computeRelativeNextSendAt(sentAt, [0, 20, 5], 2, 3);
+    expect(result.toISOString()).toBe(sentAt.toISOString());
   });
 });
 

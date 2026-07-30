@@ -144,10 +144,24 @@ export function isNonEmailChannel(
 export interface MarkSentCandidate {
   channel: OutreachChannel | null | undefined;
   status: "draft" | "approved" | "sending" | "sent";
+  /**
+   * The contact's current `currentStage` (0-3) at the time of this request.
+   * Used to distinguish a genuine double-click 409 from a repairable
+   * "log was marked sent but the contact was never advanced" state (see the
+   * `"sent"` branch below).
+   *
+   * When the contact is missing/unknown, pass `Number.POSITIVE_INFINITY` (or
+   * any value >= `logStage`) — a missing contact can never be "repaired" (there
+   * is nothing to advance), so this guarantees the guard falls through to the
+   * ordinary 409 rather than incorrectly entering `mode: "repair"`.
+   */
+  contactCurrentStage: number;
+  /** The stage (1-3) this log represents. */
+  logStage: number;
 }
 
 export type MarkSentGuardResult =
-  | { ok: true }
+  | { ok: true; mode: "claim" | "repair" }
   | { ok: false; httpStatus: 400 | 409; error: string };
 
 /**
@@ -162,14 +176,26 @@ export type MarkSentGuardResult =
  *     (sendOneLog), never be hand-marked. This is the mirror of the
  *     invariant sendOneLog enforces in the other direction (it refuses to
  *     Gmail-send a non-email log).
- *  2. Already `"sent"` → 409 (protects against a double-click marking twice
- *     and double-advancing the contact's stage).
- *  3. `"sending"` → 409 (a Gmail send should never be in flight for a
+ *  2. `"sending"` → 409 (a Gmail send should never be in flight for a
  *     non-email log, but this state is rejected defensively all the same).
- *  4. `"draft"` / `"approved"` → allowed.
+ *  3. Already `"sent"`:
+ *       - `contactCurrentStage < logStage` → `mode: "repair"`. The log was
+ *         successfully claimed sent by a PRIOR request, but that request (or
+ *         a retry of it) never got as far as advancing the contact's
+ *         stage/pipeline/nextSendAt — e.g. a transient Mongo error between
+ *         the claim and `advanceContactAfterSend`. Retrying used to 409
+ *         forever here, permanently stranding the contact at a stale stage
+ *         (see CLAUDE.md Bug 1). The caller should skip the claim (it already
+ *         happened) and just run `advanceContactAfterSend`.
+ *       - `contactCurrentStage >= logStage` → 409. The advance already
+ *         happened (or the contact has moved past this stage some other
+ *         way) — this is the genuine double-click case, and returning success
+ *         here would double-advance the contact.
+ *  4. `"draft"` / `"approved"` → `mode: "claim"` (the ordinary path: atomically
+ *     claim `draft|approved → sent`, then advance the contact).
  *
  * Pure and DB-free so it's unit-testable without mocking Mongoose — the route
- * calls this first and only proceeds to the atomic claim update on `ok: true`.
+ * calls this first and only proceeds to a DB write on `ok: true`.
  */
 export function checkMarkSentAllowed(candidate: MarkSentCandidate): MarkSentGuardResult {
   if (!isNonEmailChannel(candidate.channel)) {
@@ -181,14 +207,6 @@ export function checkMarkSentAllowed(candidate: MarkSentCandidate): MarkSentGuar
     };
   }
 
-  if (candidate.status === "sent") {
-    return {
-      ok: false,
-      httpStatus: 409,
-      error: "This log has already been marked sent.",
-    };
-  }
-
   if (candidate.status === "sending") {
     return {
       ok: false,
@@ -197,5 +215,16 @@ export function checkMarkSentAllowed(candidate: MarkSentCandidate): MarkSentGuar
     };
   }
 
-  return { ok: true };
+  if (candidate.status === "sent") {
+    if (candidate.contactCurrentStage < candidate.logStage) {
+      return { ok: true, mode: "repair" };
+    }
+    return {
+      ok: false,
+      httpStatus: 409,
+      error: "This log has already been marked sent.",
+    };
+  }
+
+  return { ok: true, mode: "claim" };
 }

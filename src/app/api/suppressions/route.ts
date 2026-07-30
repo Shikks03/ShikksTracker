@@ -3,16 +3,15 @@ import { connectDB } from "@/lib/db";
 import Suppression from "@/models/Suppression";
 import { handleError } from "@/lib/api";
 import { isValidEmail, normalizeEmail } from "@/lib/contacts";
+// Shared with createContactChecked's case-insensitive businessName dedupe.
+// Was a private copy here until 2026-07-30; two identical escapers is exactly
+// the drift this codebase already had to clean up once (Task 5.1).
+import { escapeRegex } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
 const SUPPRESSION_REASONS = ["unsubscribed", "bounced", "manual"] as const;
 type SuppressionReason = typeof SUPPRESSION_REASONS[number];
-
-/** Escape special regex metacharacters in a user-supplied search string. */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 export async function GET(request: NextRequest) {
   try {

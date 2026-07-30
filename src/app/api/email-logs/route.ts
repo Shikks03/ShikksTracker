@@ -4,8 +4,69 @@ import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
 import { isSubjectRequiredForChannel } from "@/lib/outreachLogs";
+import { EMAIL_CHANNEL_QUERY } from "@/lib/sequence";
 
 export const dynamic = "force-dynamic";
+
+const VALID_CHANNELS = ["email", "facebook", "instagram", "phone"] as const;
+
+export type ChannelFilterResult =
+  | { ok: true }
+  | { ok: false; httpStatus: 400; error: string };
+
+/**
+ * Applies the `?channel=` query filter onto an in-progress Mongo filter
+ * object, mutating it in place. Extracted as a pure, DB-free function so the
+ * channel predicate can be unit-tested without mocking Mongoose (see
+ * src/lib/__tests__/emailLogsChannelFilter.test.ts) — matching the project
+ * convention of pure helpers being independently testable
+ * (resolveOutreachLogStatusFilter in outreachLogs.ts is the sibling case for
+ * the /api/outreach-logs route).
+ *
+ *  - Invalid channel value → `{ ok: false, httpStatus: 400, ... }`.
+ *  - `channel === "email"` → migration-safe: matches an explicit
+ *    `channel: "email"` OR a legacy log written before the `channel` field
+ *    existed (absent/null). A bare equality check would miss those legacy
+ *    logs, making them vanish from the only approval UI (/review) while cron
+ *    auto-send (which uses this same EMAIL_CHANNEL_QUERY predicate) still
+ *    picks them up — the bug this function fixes. Uses EMAIL_CHANNEL_QUERY
+ *    from sequence.ts rather than hand-rolling the equivalent `$or` so the
+ *    two stay in lockstep.
+ *  - Non-email channel → exact equality is correct: the channel field did
+ *    not exist before the multi-channel migration, so there is no
+ *    "legacy facebook log" case to account for.
+ *
+ * Defensive merge: nothing upstream in this route sets `filter.$or` today,
+ * but if it ever did, blindly spreading EMAIL_CHANNEL_QUERY's `$or` into
+ * `filter` would silently clobber the earlier `$or` (a later object key
+ * write replaces the earlier one). Combining via `$and` instead preserves
+ * both conditions regardless of what filter shape the caller passes in.
+ */
+export function applyChannelFilter(
+  filter: Record<string, unknown>,
+  channel: string
+): ChannelFilterResult {
+  if (!VALID_CHANNELS.includes(channel as (typeof VALID_CHANNELS)[number])) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      error: `channel must be one of: ${VALID_CHANNELS.join(", ")}`,
+    };
+  }
+
+  if (channel === "email") {
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, EMAIL_CHANNEL_QUERY];
+      delete filter.$or;
+    } else {
+      Object.assign(filter, EMAIL_CHANNEL_QUERY);
+    }
+  } else {
+    filter.channel = channel;
+  }
+
+  return { ok: true };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,7 +88,12 @@ export async function GET(request: NextRequest) {
     // "email" here — the contact-detail page calls this same endpoint with
     // only `contactId` and must keep showing that contact's full history
     // across every channel.
-    if (channel) filter.channel = channel;
+    if (channel) {
+      const result = applyChannelFilter(filter, channel);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error }, { status: result.httpStatus });
+      }
+    }
 
     const logs = await EmailLog.find(filter).lean();
     return NextResponse.json(logs);

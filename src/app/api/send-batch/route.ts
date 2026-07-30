@@ -54,10 +54,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Load only approved logs, capped at remaining daily allowance
+    // Load only approved logs, capped at remaining daily allowance.
+    // EMAIL_CHANNEL_QUERY excludes facebook/instagram/phone logs from this
+    // query (matches only channel:"email" or a legacy channel-less log) so a
+    // non-email id mixed into the request can't consume a slot in
+    // capRemaining ahead of a real email log — sendOneLog would refuse to
+    // Gmail-send it anyway (see its isNonEmailChannel guard), but by then the
+    // .limit() cutoff may already have pushed a legitimate email log outside
+    // the batch, silently dropping it from both `results` and the send.
     const logs = await EmailLog.find({
       _id: { $in: ids },
       status: "approved",
+      ...EMAIL_CHANNEL_QUERY,
     }).limit(capRemaining);
 
     const results: {

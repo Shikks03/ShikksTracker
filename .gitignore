@@ -57,3 +57,5 @@ next-env.d.ts
 # SESSION_NOTES calls this the visual source of truth — delete this line
 # if you decide it should be versioned with the repo.
 /design reference/
+
+.vercel

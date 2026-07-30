@@ -3,6 +3,8 @@ import {
   normalizeHandleUrl,
   normalizeWebsiteUrl,
   telHref,
+  compactHandle,
+  displayIdentity,
   CHANNEL_META,
   TIER_LABELS,
 } from "@/lib/channels";
@@ -85,6 +87,93 @@ describe("telHref", () => {
 
   it("leaves an already-compact number unchanged", () => {
     expect(telHref("09171234567")).toBe("tel:09171234567");
+  });
+});
+
+/**
+ * These guard a crash: several dashboard/contact-detail call sites used to do
+ * `(contactName || contactEmail).toUpperCase()`, which threw on the first
+ * scraped Facebook/phone lead (those have NEITHER field). displayIdentity must
+ * therefore always return a non-empty string, for every shape of contact.
+ */
+describe("compactHandle", () => {
+  it("reduces a social profile URL to @handle", () => {
+    expect(compactHandle("https://facebook.com/cafebytheruins", "facebook")).toBe("@cafebytheruins");
+    expect(compactHandle("facebook.com/cafebytheruins/", "facebook")).toBe("@cafebytheruins");
+    expect(compactHandle("https://instagram.com/sunrisedental_ph?hl=en", "instagram")).toBe("@sunrisedental_ph");
+    expect(compactHandle("https://fb.me/xyz", "facebook")).toBe("@xyz");
+  });
+
+  it("leaves an already-bare @handle alone and never double-prefixes", () => {
+    expect(compactHandle("@sunrisedental_ph", "instagram")).toBe("@sunrisedental_ph");
+  });
+
+  it("skips Facebook's non-identity path prefixes", () => {
+    // "/pages/Foo-Cafe/12345" — the first segment is meaningless.
+    expect(compactHandle("https://www.facebook.com/pages/Foo-Cafe/12345", "facebook")).toBe("@Foo-Cafe");
+  });
+
+  it("returns \"\" when no human-readable segment exists", () => {
+    // The identity lives only in the stripped query string.
+    expect(compactHandle("https://facebook.com/profile.php?id=61550", "facebook")).toBe("");
+  });
+
+  it("leaves phone numbers readable", () => {
+    expect(compactHandle("+63 74 442 4010", "phone")).toBe("+63 74 442 4010");
+  });
+
+  it("does not mangle a value that was never a URL", () => {
+    expect(compactHandle("Maria Santos", "facebook")).toBe("Maria Santos");
+    expect(compactHandle("", "facebook")).toBe("");
+  });
+});
+
+describe("displayIdentity", () => {
+  it("never returns an empty string, whatever is missing", () => {
+    const shapes = [
+      { businessName: "Ghost Store" },
+      { businessName: "Ghost Store", outreachChannel: "facebook", facebook: "   " },
+      { businessName: "Ghost Store", outreachChannel: "facebook", facebook: "" },
+      { businessName: "Ghost Store", outreachChannel: "facebook", facebook: "https://facebook.com/profile.php?id=1" },
+      { businessName: "Ghost Store", outreachChannel: "phone", phone: "" },
+    ];
+    for (const c of shapes) {
+      expect(displayIdentity(c).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("prefers the channel handle for a scraped lead with no name or email", () => {
+    expect(
+      displayIdentity({
+        businessName: "Cafe by the Ruins",
+        outreachChannel: "facebook",
+        facebook: "https://facebook.com/cafebytheruins",
+      })
+    ).toBe("@cafebytheruins");
+  });
+
+  it("falls back to businessName when the handle is unusable", () => {
+    expect(
+      displayIdentity({ businessName: "Ghost Store", outreachChannel: "facebook", facebook: "   " })
+    ).toBe("Ghost Store");
+  });
+
+  // Regression guards: email contacts must render exactly as they did before
+  // the multi-channel work.
+  it("is unchanged for email contacts", () => {
+    expect(
+      displayIdentity({
+        businessName: "Acme",
+        outreachChannel: "email",
+        contactName: "Maria Santos",
+        contactEmail: "maria@acme.ph",
+      })
+    ).toBe("Maria Santos");
+    expect(
+      displayIdentity({ businessName: "Acme", outreachChannel: "email", contactEmail: "maria@acme.ph" })
+    ).toBe("maria@acme.ph");
+    // Legacy contact with no outreachChannel at all.
+    expect(displayIdentity({ businessName: "Old Co", contactEmail: "old@co.ph" })).toBe("old@co.ph");
   });
 });
 

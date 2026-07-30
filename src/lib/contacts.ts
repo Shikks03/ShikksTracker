@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 // Pure email helpers live in email.ts (no server deps) — import for local use
 // and re-export for backward compatibility so all existing server-side imports
 // still work unchanged.
-import { normalizeEmail, isValidEmail } from "@/lib/email";
+import { normalizeEmail, isValidEmail, escapeRegex } from "@/lib/email";
 export { normalizeEmail, isValidEmail };
 
 type LeadSource = "cold_email" | "referral" | "event_connection" | "other";
@@ -141,13 +141,31 @@ export async function createContactChecked(
   }
 
   // 3. Dedupe: prefer sourcePlaceId (scraped leads), else businessName within the campaign.
+  //
+  // The businessName fallback is matched case-insensitively and trimmed
+  // (anchored ^...$ regex, metacharacters escaped via escapeRegex) so it
+  // agrees with the import route's intra-file dedupe key
+  // (`businessName.trim().toLowerCase()` in handleScraperImport). Without
+  // this, "Sunrise Cafe" imported in one file and "SUNRISE CAFE" imported in
+  // a later file would both pass this DB check (exact-match misses the
+  // case difference) and insert a duplicate contact.
+  //
+  // NOTE (lookup-only fix): this closes the common sequential-import case
+  // but does not close a race — two concurrent imports/inserts for the same
+  // business name could still both pass this findOne before either insert
+  // completes. A fully robust fix needs a normalized stored key plus a
+  // partial unique index, which is a schema/migration change out of scope
+  // here.
   const existing = input.sourcePlaceId
     ? await Contact.findOne({
         sourcePlaceId: input.sourcePlaceId,
         campaignId: input.campaignId,
       }).lean()
     : await Contact.findOne({
-        businessName: input.businessName,
+        businessName: {
+          $regex: `^${escapeRegex(input.businessName.trim())}$`,
+          $options: "i",
+        },
         campaignId: input.campaignId,
       }).lean();
   if (existing) {
@@ -199,8 +217,20 @@ export interface SuppressContactOptions {
  * Steps:
  *  1. Load the contact to get its email (needed for Suppression).
  *     Returns silently if the contact is not found.
- *  2. Optionally upsert a Suppression entry (idempotent — safe to call when
- *     an entry already exists; uses $setOnInsert + $set pattern from replies.ts).
+ *  2. Optionally upsert a Suppression entry — ONLY when the contact has a
+ *     non-empty `contactEmail` string (idempotent — safe to call when an
+ *     entry already exists; uses $setOnInsert + $set pattern from replies.ts).
+ *     Suppression is an email-address blocklist; a facebook/instagram/phone
+ *     contact scraped with no email captured has nothing to add to it. This
+ *     is a deliberate semantic decision, not an oversight: skipping the
+ *     upsert here avoids a Mongoose cast filter of `{ email: undefined }`,
+ *     which strips the `email` key from both the match filter and
+ *     `$setOnInsert` (update validators are off by default, so schema
+ *     `required` does not catch this) — the query then either patches an
+ *     unrelated Suppression row that happens to match `{}` first, or upserts
+ *     a junk row with no `email` field at all. An email-less contact still
+ *     gets every other part of this transition (status change, pending-log
+ *     deletion) — only the Suppression write is skipped.
  *  3. Update the contact:
  *       status  → "bounced" when reason === "bounced", otherwise "unsubscribed"
  *       nextSendAt → null
@@ -229,7 +259,12 @@ export async function suppressContact(
     return;
   }
 
-  if (upsertSuppression) {
+  // Only write to the Suppression collection when there is an actual email
+  // address to suppress. contact.contactEmail is `undefined` for
+  // facebook/instagram/phone contacts with no email captured — passing that
+  // straight to Suppression.updateOne's filter is unsafe (see the doc
+  // comment above), and there is nothing meaningful to suppress anyway.
+  if (upsertSuppression && typeof contact.contactEmail === "string" && contact.contactEmail) {
     // Idempotent upsert: $setOnInsert sets email/addedAt on first insert,
     // $set updates reason on every call (same pattern as replies.ts opt-out path).
     await Suppression.updateOne(

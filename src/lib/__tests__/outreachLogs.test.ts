@@ -114,9 +114,18 @@ describe("VALID_OUTREACH_LOG_STATUSES", () => {
 // ---------------------------------------------------------------------------
 
 describe("checkMarkSentAllowed", () => {
+  // contactCurrentStage/logStage are irrelevant to the channel/sending
+  // branches (they short-circuit before the stage comparison), so arbitrary
+  // placeholder values are used for those cases.
+
   it("rejects channel: 'email' with 400, regardless of status", () => {
     for (const status of ["draft", "approved", "sending", "sent"] as const) {
-      const result = checkMarkSentAllowed({ channel: "email", status });
+      const result = checkMarkSentAllowed({
+        channel: "email",
+        status,
+        contactCurrentStage: 0,
+        logStage: 1,
+      });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.httpStatus).toBe(400);
@@ -125,8 +134,58 @@ describe("checkMarkSentAllowed", () => {
     }
   });
 
-  it("rejects an already-sent non-email log with 409", () => {
-    const result = checkMarkSentAllowed({ channel: "facebook", status: "sent" });
+  it("rejects a non-email log currently 'sending' with 409", () => {
+    const result = checkMarkSentAllowed({
+      channel: "instagram",
+      status: "sending",
+      contactCurrentStage: 0,
+      logStage: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.httpStatus).toBe(409);
+    }
+  });
+
+  it("allows a draft non-email log (mode: claim)", () => {
+    expect(
+      checkMarkSentAllowed({ channel: "facebook", status: "draft", contactCurrentStage: 0, logStage: 1 })
+    ).toEqual({ ok: true, mode: "claim" });
+  });
+
+  it("allows an approved non-email log (mode: claim)", () => {
+    expect(
+      checkMarkSentAllowed({ channel: "phone", status: "approved", contactCurrentStage: 0, logStage: 1 })
+    ).toEqual({ ok: true, mode: "claim" });
+  });
+
+  it("allows all three non-email channels when draft", () => {
+    for (const channel of ["facebook", "instagram", "phone"] as const) {
+      expect(
+        checkMarkSentAllowed({ channel, status: "draft", contactCurrentStage: 0, logStage: 1 })
+      ).toEqual({ ok: true, mode: "claim" });
+    }
+  });
+
+  it("a sent log whose contact was never advanced (currentStage < logStage) is a repair, not a 409", () => {
+    // Stranded-contact case (Bug 1): a prior claim succeeded (log is "sent")
+    // but advanceContactAfterSend never ran, so the contact is still behind.
+    const result = checkMarkSentAllowed({
+      channel: "facebook",
+      status: "sent",
+      contactCurrentStage: 1,
+      logStage: 2,
+    });
+    expect(result).toEqual({ ok: true, mode: "repair" });
+  });
+
+  it("a sent log whose contact currentStage equals logStage is a genuine double-click -> 409", () => {
+    const result = checkMarkSentAllowed({
+      channel: "facebook",
+      status: "sent",
+      contactCurrentStage: 2,
+      logStage: 2,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.httpStatus).toBe(409);
@@ -134,35 +193,47 @@ describe("checkMarkSentAllowed", () => {
     }
   });
 
-  it("rejects a non-email log currently 'sending' with 409", () => {
-    const result = checkMarkSentAllowed({ channel: "instagram", status: "sending" });
+  it("a sent log whose contact currentStage is already ahead of logStage is also a 409 (not a repair)", () => {
+    const result = checkMarkSentAllowed({
+      channel: "facebook",
+      status: "sent",
+      contactCurrentStage: 3,
+      logStage: 2,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.httpStatus).toBe(409);
     }
   });
 
-  it("allows a draft non-email log", () => {
-    expect(checkMarkSentAllowed({ channel: "facebook", status: "draft" })).toEqual({ ok: true });
-  });
-
-  it("allows an approved non-email log", () => {
-    expect(checkMarkSentAllowed({ channel: "phone", status: "approved" })).toEqual({ ok: true });
-  });
-
-  it("allows all three non-email channels when draft", () => {
-    for (const channel of ["facebook", "instagram", "phone"] as const) {
-      expect(checkMarkSentAllowed({ channel, status: "draft" })).toEqual({ ok: true });
-    }
+  it("a sent log with a missing contact (Infinity currentStage sentinel) never repairs -> 409", () => {
+    const result = checkMarkSentAllowed({
+      channel: "facebook",
+      status: "sent",
+      contactCurrentStage: Number.POSITIVE_INFINITY,
+      logStage: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.httpStatus).toBe(409);
   });
 
   it("rejects a legacy log with channel undefined/null with 400 (treated as email)", () => {
     for (const status of ["draft", "approved", "sending", "sent"] as const) {
-      const undefinedResult = checkMarkSentAllowed({ channel: undefined, status });
+      const undefinedResult = checkMarkSentAllowed({
+        channel: undefined,
+        status,
+        contactCurrentStage: 0,
+        logStage: 1,
+      });
       expect(undefinedResult.ok).toBe(false);
       if (!undefinedResult.ok) expect(undefinedResult.httpStatus).toBe(400);
 
-      const nullResult = checkMarkSentAllowed({ channel: null, status });
+      const nullResult = checkMarkSentAllowed({
+        channel: null,
+        status,
+        contactCurrentStage: 0,
+        logStage: 1,
+      });
       expect(nullResult.ok).toBe(false);
       if (!nullResult.ok) expect(nullResult.httpStatus).toBe(400);
     }

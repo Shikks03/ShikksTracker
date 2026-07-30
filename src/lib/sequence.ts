@@ -230,17 +230,82 @@ export function computeNextSendAt(
   return new Date(firstSentAt.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Canonical fallback day offset for a given stage, used when `spacingDays` is
+ * malformed/too short to index. Mirrors the [0,5,9] schema default
+ * (`Campaign.sequenceSpacingDays`) index-for-index.
+ */
+function fallbackDaysForStage(stage: 1 | 2 | 3): number {
+  return stage === 1 ? 0 : stage === 2 ? 5 : 9;
+}
+
+/**
+ * Computes nextSendAt using RELATIVE spacing between two stages, for the case
+ * where the usual absolute anchor (the stage-1 log's `sentAt`) doesn't exist —
+ * e.g. a stage-2 log was created directly on a stage-0 contact (skipping
+ * stage 1 entirely, which `POST /api/email-logs` currently allows), so there
+ * is no stage-1 `sent` log to anchor the [0,5,9]-style absolute spacing to.
+ *
+ * `computeNextSendAt` always measures from a single fixed anchor (the
+ * stage-1 send), so re-purposing it with `sentAt` (the CURRENT send, not
+ * stage 1's) as if it were that anchor computes the wrong interval — e.g. a
+ * stage-2 send with spacing [0,5,9] would schedule stage 3 a full 9 days
+ * later instead of the intended 5→9 gap of 4 days.
+ *
+ * Instead, this computes the gap BETWEEN the two stages' configured offsets
+ * (`spacingDays[nextStage-1] - spacingDays[logStage-1]`) and applies that
+ * relative gap from `sentAt`. With the default [0,5,9], a stage 2 → 3
+ * transition with no stage-1 anchor schedules stage 3 `9 - 5 = 4` days out.
+ *
+ * Guards:
+ *  - A malformed/short `spacingDays` array falls back to the canonical
+ *    [0,5,9]-equivalent offset for the missing index (same convention as
+ *    `computeNextSendAt`'s own fallback), so a short array never produces
+ *    `NaN`.
+ *  - A negative computed interval (e.g. a misconfigured/out-of-order spacing
+ *    array) clamps to 0 days (send immediately) rather than scheduling a
+ *    `nextSendAt` before `sentAt`.
+ *
+ * Exported for unit tests — treat as internal to `advanceContactAfterSend`.
+ */
+export function computeRelativeNextSendAt(
+  sentAt: Date,
+  spacingDays: number[],
+  logStage: 1 | 2 | 3,
+  nextStage: 2 | 3
+): Date {
+  const logDays = spacingDays[logStage - 1] ?? fallbackDaysForStage(logStage);
+  const nextDays = spacingDays[nextStage - 1] ?? fallbackDaysForStage(nextStage);
+  const intervalDays = Math.max(0, nextDays - logDays);
+  return new Date(sentAt.getTime() + intervalDays * 24 * 60 * 60 * 1000);
+}
+
 // ---------------------------------------------------------------------------
 // Exported: advance Contact state after a log has been successfully sent
 // ---------------------------------------------------------------------------
 
 /**
+ * Result of `advanceContactAfterSend`. Distinguishes the ordinary case
+ * (`applied: true` — the guarded update matched and wrote) from the guarded
+ * no-op case (`applied: false` — the contact's `currentStage` was already
+ * `>= log.stage` at write time, so the update was skipped to avoid
+ * regressing a later stage; see the monotonic-guard doc below). A no-op is
+ * NOT an error: it means another request (or an earlier stage arriving late)
+ * already advanced this contact past this log's stage. Callers may log it
+ * for observability but should otherwise treat it as success.
+ */
+export type AdvanceContactResult =
+  | { applied: true }
+  | { applied: false; reason: string };
+
+/**
  * Advances Contact state (currentStage, pipelineStage, nextSendAt) after a
  * log for `contact` has been successfully sent. This is the ONLY place that
  * logic lives — extracted from `sendOneLog` as a pure refactor (behaviour is
- * unchanged) so Phase 4's manual "mark sent" endpoint (for facebook/
- * instagram/phone touches sent by the human on that platform) can share the
- * exact same state transitions instead of re-deriving them.
+ * unchanged for the normal in-order case) so Phase 4's manual "mark sent"
+ * endpoint (for facebook/instagram/phone touches sent by the human on that
+ * platform) can share the exact same state transitions instead of
+ * re-deriving them.
  *
  * Signature / design choice: `campaign` is an OPTIONAL parameter rather than
  * always re-loaded here. `sendOneLog` already has the campaign loaded (it
@@ -251,13 +316,44 @@ export function computeNextSendAt(
  * loads it itself via `log.campaignId` (falling back to the schema default
  * `[0, 5, 9]` if the campaign is somehow missing, so a dangling reference
  * can't throw here). Both call shapes produce identical Contact state.
+ *
+ * Monotonic guard (fixes a regression bug): two logs belonging to the SAME
+ * contact — e.g. a stage-1 and a stage-3 log both pending — can be marked
+ * sent concurrently or out of order. The per-log atomic claim (draft/approved
+ * → sending/sent) serialises requests for the SAME log, but nothing
+ * previously serialised requests for DIFFERENT logs on the same contact: a
+ * slower stage-1 request could land after a faster stage-3 request and
+ * unconditionally overwrite `currentStage: 3` back down to `currentStage: 1`,
+ * silently re-scheduling and re-contacting an already-finished contact. To
+ * prevent this, the write is a conditional `Contact.findOneAndUpdate` guarded
+ * on `currentStage: { $lt: log.stage }` — a lower-stage write can never
+ * clobber a higher-stage one. When the guard doesn't match (no document
+ * satisfies the condition), that's a no-op, not an error: `applied: false` is
+ * returned so callers can log it distinguishably. In the ordinary in-order
+ * case (the common path — Gmail sends via `sendOneLog`, and manual mark-sent
+ * for a contact progressing stage 1 → 2 → 3 normally) the contact's
+ * `currentStage` is always `< log.stage` at write time, so the guard always
+ * matches and behaviour is unchanged from before this fix.
+ *
+ * Missing stage-1-anchor fallback (fixes a spacing bug): the usual case
+ * anchors `nextSendAt` to the stage-1 log's `sentAt` (`computeNextSendAt`,
+ * absolute spacing — unchanged, still the path taken whenever a stage-1
+ * `sent` log exists). If no stage-1 `sent` log exists at all — e.g. a
+ * stage-2 log was created directly on a stage-0 contact via
+ * `POST /api/email-logs`, skipping stage 1 — there is no absolute anchor to
+ * measure from. Previously this fell back to treating `sentAt` (THIS send,
+ * not stage 1's) as the anchor, which measures the full absolute offset from
+ * the wrong instant (e.g. scheduling stage 3 a full 9 days after a stage-2
+ * send instead of the intended 4-day 2→3 gap). Now it falls back to
+ * `computeRelativeNextSendAt`, which measures the gap BETWEEN the two
+ * stages' configured offsets instead — see that function's doc comment.
  */
 export async function advanceContactAfterSend(
   contact: IContact,
   log: IEmailLog,
   sentAt: Date,
   campaign?: Pick<ICampaign, "sequenceSpacingDays"> | null
-): Promise<void> {
+): Promise<AdvanceContactResult> {
   let spacingDays = campaign?.sequenceSpacingDays;
   if (!spacingDays) {
     const loadedCampaign = (await Campaign.findById(log.campaignId)
@@ -273,31 +369,40 @@ export async function advanceContactAfterSend(
     contactUpdate.pipelineStage = "contacted";
   }
 
-  let firstSentAt: Date;
-  if (log.stage === 1) {
-    firstSentAt = sentAt;
-  } else {
-    const stage1Log = await EmailLog.findOne({
-      contactId: contact._id,
-      stage: 1,
-      status: "sent",
-    })
-      .select({ sentAt: 1 })
-      .lean();
-    firstSentAt = stage1Log?.sentAt ?? sentAt;
-  }
-
   if (log.stage < 3) {
-    contactUpdate.nextSendAt = computeNextSendAt(
-      firstSentAt,
-      spacingDays,
-      (log.stage + 1) as 2 | 3
-    );
+    const nextStage = (log.stage + 1) as 2 | 3;
+    if (log.stage === 1) {
+      // Stage 1 IS the anchor — no lookup needed (matches prior behaviour).
+      contactUpdate.nextSendAt = computeNextSendAt(sentAt, spacingDays, nextStage);
+    } else {
+      const stage1Log = await EmailLog.findOne({
+        contactId: contact._id,
+        stage: 1,
+        status: "sent",
+      })
+        .select({ sentAt: 1 })
+        .lean();
+
+      contactUpdate.nextSendAt = stage1Log?.sentAt
+        ? computeNextSendAt(stage1Log.sentAt, spacingDays, nextStage)
+        : computeRelativeNextSendAt(sentAt, spacingDays, log.stage as 1 | 2, nextStage);
+    }
   } else {
     contactUpdate.nextSendAt = null;
   }
 
-  await Contact.findByIdAndUpdate(contact._id, contactUpdate);
+  const updated = await Contact.findOneAndUpdate(
+    { _id: contact._id, currentStage: { $lt: log.stage } },
+    contactUpdate
+  );
+
+  if (!updated) {
+    const reason = `advanceContactAfterSend: no-op — contact ${String(contact._id)} currentStage already >= log stage ${log.stage}; guarded update skipped to avoid regressing a later/concurrent stage`;
+    console.warn(`[sequence] ${reason}`);
+    return { applied: false, reason };
+  }
+
+  return { applied: true };
 }
 
 // ---------------------------------------------------------------------------

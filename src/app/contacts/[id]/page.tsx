@@ -21,6 +21,7 @@ import {
   normalizeHandleUrl,
   normalizeWebsiteUrl,
   telHref,
+  displayIdentity,
   type Channel,
 } from "@/lib/channels";
 
@@ -112,7 +113,10 @@ interface Contact {
   _id: string;
   businessName: string;
   contactName?: string;
-  contactEmail: string;
+  // Multi-channel outreach (Phase 4): scraped Facebook/Instagram/phone-only
+  // leads have no email either — optional. See displayIdentity() in channels.ts for
+  // the render-time fallback.
+  contactEmail?: string;
   leadSource: string;
   keyPoints: string;
   status: string;
@@ -151,6 +155,7 @@ interface Campaign {
   _id: string;
   name: string;
 }
+
 
 // ── API helper ────────────────────────────────────────────────────────────────
 
@@ -353,17 +358,24 @@ export default function ContactDetailPage() {
   const advanceTo    = ADVANCE_TO[contact.pipelineStage];
   const advanceLabel = ADVANCE_LABEL[contact.pipelineStage];
 
-  // Meta line: only non-empty segments
+  // Meta line: only non-empty segments. contactEmail is absent for
+  // scraped Facebook/Instagram/phone-only leads — omit that segment
+  // entirely rather than pushing an empty string (which would leave a
+  // dangling " · " once joined).
   const metaParts: string[] = [];
   if (contact.contactName) metaParts.push(contact.contactName.toUpperCase());
-  metaParts.push(contact.contactEmail.toUpperCase());
+  if (contact.contactEmail) metaParts.push(contact.contactEmail.toUpperCase());
   if (contact.leadSource)  metaParts.push(LEAD_SOURCE_MAP[contact.leadSource] ?? contact.leadSource.toUpperCase());
   if (campaignName)         metaParts.push(campaignName.toUpperCase());
 
-  // Contact first name for inbound captions
+  // Contact first name for inbound captions. Named/email contacts render
+  // byte-for-byte as before; a contact with neither (scraped, no email)
+  // falls back through displayIdentity (handle → email → businessName).
   const contactFirstName = contact.contactName
     ? contact.contactName.split(" ")[0].toUpperCase()
-    : contact.contactEmail.split("@")[0].toUpperCase();
+    : contact.contactEmail
+    ? contact.contactEmail.split("@")[0].toUpperCase()
+    : displayIdentity(contact).split(" ")[0].toUpperCase();
 
   const thread = buildThread(logs);
 

@@ -20,6 +20,7 @@ import {
   serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
   AMBER, AMBER_TEXT, HOT_TEXT, GREEN_SENT, HOT_BG,
 } from "@/components/tokens";
+import { displayIdentity } from "@/lib/channels";
 import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
 
 // Send window hours (Manila) — must match sequence.ts
@@ -49,8 +50,15 @@ interface CronRunDoc {
 interface ContactRow {
   _id: string;
   businessName: string;
-  contactEmail: string;
+  // Multi-channel outreach (Phase 4): scraped Facebook/Instagram/phone-only
+  // leads have neither a name nor an email — both are optional. See
+  // displayIdentity() in src/lib/channels.ts for the render-time fallback.
+  contactEmail?: string;
   contactName?: string;
+  outreachChannel?: string;
+  phone?: string;
+  facebook?: string;
+  instagram?: string;
   leadSource: string;
   pipelineStage: string;
   status: string;
@@ -157,9 +165,10 @@ function getKickerDate(): string {
   return `${DAY[now.getDay()]} · ${MON[now.getMonth()]} ${now.getDate()}`;
 }
 
+
 // Row meta builders
 function repliedMeta(c: ContactRow): string {
-  const name = (c.contactName || c.contactEmail).toUpperCase();
+  const name = displayIdentity(c).toUpperCase();
   const parts: string[] = [name];
   if (c.repliedAt) parts.push(`REPLIED ${timeAgo(c.repliedAt)}`);
   if (c.replySnippet) parts.push(`"${c.replySnippet}"`);
@@ -167,7 +176,7 @@ function repliedMeta(c: ContactRow): string {
 }
 
 function inSequenceMeta(c: ContactRow): string {
-  const name = (c.contactName || c.contactEmail).toUpperCase();
+  const name = displayIdentity(c).toUpperCase();
   const ord  = ordinal(c.lastLogStage);
   if (!c.lastLogStage) return `${name} · QUEUED`;
   if (c.lastLogStatus === "draft" || c.lastLogStatus === "approved") {
@@ -180,7 +189,7 @@ function inSequenceMeta(c: ContactRow): string {
 }
 
 function closedMeta(c: ContactRow): string {
-  const name  = (c.contactName || c.contactEmail).toUpperCase();
+  const name  = displayIdentity(c).toUpperCase();
   const stage = c.pipelineStage === "won" ? "WON" : "LOST";
   return `${name} · ${stage}`;
 }
@@ -446,14 +455,20 @@ export default function Dashboard() {
 
   useEffect(() => { loadContacts(); }, [loadContacts]);
 
-  // Client-side search filter
+  // Client-side search filter. contactName/contactEmail/phone/facebook/
+  // instagram are all optional (multi-channel scraped leads may have none
+  // but businessName) — optional-chain each so a missing field just fails to
+  // match instead of throwing.
   const filtered = search.trim()
-    ? contacts.filter(({ businessName, contactName, contactEmail }) => {
+    ? contacts.filter(({ businessName, contactName, contactEmail, phone, facebook, instagram }) => {
         const q = search.toLowerCase();
         return (
           businessName.toLowerCase().includes(q) ||
           (contactName?.toLowerCase().includes(q) ?? false) ||
-          contactEmail.toLowerCase().includes(q)
+          (contactEmail?.toLowerCase().includes(q) ?? false) ||
+          (phone?.toLowerCase().includes(q) ?? false) ||
+          (facebook?.toLowerCase().includes(q) ?? false) ||
+          (instagram?.toLowerCase().includes(q) ?? false)
         );
       })
     : contacts;
