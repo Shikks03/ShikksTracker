@@ -34,12 +34,40 @@ End-to-end checklist for going live. Work through the steps in order — each se
    | `ANTHROPIC_API_KEY` | From [console.anthropic.com](https://console.anthropic.com) |
    | `APP_BASE_URL` | Your production URL, e.g. `https://shikkstracker.vercel.app` (no trailing slash) |
    | `CRON_SECRET` | A long random string — keep this secret; it protects the sequence engine endpoint |
-   | `DASHBOARD_PASSWORD` | A strong password for the dashboard login page (required — the app returns 503 if unset) |
+   | `DASHBOARD_PASSWORD` | A strong password for the dashboard login page. **Minimum 12 characters** — the app returns 503 if unset or shorter |
+   | `SESSION_SECRET` | **Required.** Random, **minimum 32 characters**, and **must be different from `DASHBOARD_PASSWORD`**. See the warning below |
    | `NTFY_TOPIC_URL` | Optional — leave blank unless you want ntfy alerts |
    | `TELEGRAM_BOT_TOKEN` | Optional — leave blank unless you want Telegram alerts |
    | `TELEGRAM_CHAT_ID` | Optional — leave blank unless you want Telegram alerts |
 
-   **Sensitive variables:** Mark `MONGODB_URI`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `ANTHROPIC_API_KEY`, `CRON_SECRET`, and `DASHBOARD_PASSWORD` as **Sensitive** in the Vercel dashboard (the eye-slash icon — makes them write-only so they cannot be read back) and scope them to **Production** only. `GOOGLE_CLIENT_ID` and `APP_BASE_URL` are not secret and can remain readable.
+   > ### ⚠️ `SESSION_SECRET` — set this BEFORE you deploy
+   >
+   > The session cookie is signed with `SESSION_SECRET`. It is deliberately **not** derived from
+   > `DASHBOARD_PASSWORD`: it used to be, and that made every issued cookie an offline
+   > password-cracking oracle (one SHA-256 per guess, no salt) — fixed 2026-07-31.
+   >
+   > - **If it is missing or under 32 chars, the whole dashboard returns 503.** Add it to Vercel
+   >   *before* promoting the deploy, not after.
+   > - **This deploy invalidates every existing session.** The old cookie format is rejected
+   >   outright, so you will be logged out and must log in again. That is expected.
+   > - Generate one with PowerShell:
+   >   ```powershell
+   >   -join ((1..32) | % { '{0:x2}' -f (Get-Random -Max 256) })
+   >   ```
+   > - **Rotating `SESSION_SECRET` is how you revoke sessions.** There is no server-side session
+   >   store, so `POST /api/auth/logout` only clears the cookie in *that* browser. If a cookie
+   >   leaks or a device is lost, rotate this value and redeploy — every session dies immediately.
+   > - Rotating `DASHBOARD_PASSWORD` alone does **not** log anyone out any more.
+
+   > ### ⚠️ `APP_BASE_URL` must exactly match your real origin
+   >
+   > Mutating requests (POST/PATCH/DELETE) are now rejected with **403** if the browser's `Origin`
+   > header does not match `APP_BASE_URL`. If you set it to the wrong host, or leave a trailing
+   > slash mismatch, or later add a custom domain and forget to update this, the dashboard will
+   > load fine and read fine but **every save, send, import and delete will fail with 403**.
+   > If you serve the app on more than one hostname, they must agree on one canonical origin.
+
+   **Sensitive variables:** Mark `MONGODB_URI`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `ANTHROPIC_API_KEY`, `CRON_SECRET`, `DASHBOARD_PASSWORD`, and `SESSION_SECRET` as **Sensitive** in the Vercel dashboard (the eye-slash icon — makes them write-only so they cannot be read back) and scope them to **Production** only. `GOOGLE_CLIENT_ID` and `APP_BASE_URL` are not secret and can remain readable.
 
    Optional tuning variables (defaults are safe to omit initially):
 

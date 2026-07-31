@@ -108,14 +108,19 @@ GOOGLE_REFRESH_TOKEN=
 ANTHROPIC_API_KEY=
 APP_BASE_URL=            # tracking pixel, click redirects, alert links
 CRON_SECRET=             # protects the sequence-engine endpoint
-DASHBOARD_PASSWORD=      # required — /login password; app fails closed (503) if unset
+DASHBOARD_PASSWORD=      # required — /login password, min 12 chars; app fails closed (503) if unset/short
+SESSION_SECRET=          # required — random, min 32 chars, MUST differ from DASHBOARD_PASSWORD.
+                         # HMAC key for the session cookie. Rotating it = revoke every session.
 # ALLOW_OAUTH_BOOTSTRAP=true  # temporarily enables /api/auth/gmail outside development
+# ALLOW_TEST_ROUTES=true      # temporarily enables /api/test/* outside development
 
 # Later, if the takeover alert is upgraded beyond email:
 NTFY_TOPIC_URL=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
+# Security tuning (defaults): LOGIN_MAX_PER_IP=5, LOGIN_MAX_GLOBAL=20,
+# LOGIN_WINDOW_MINUTES=15, MAX_IMPORT_BYTES=2000000, MAX_IMPORT_ROWS=5000
 # Optional tuning (defaults): ANTHROPIC_MODEL=claude-sonnet-4-6, DAILY_SEND_CAP=15,
 # SENDS_PER_RUN=1 (default 1 for Hobby safety — raise only on Pro/longer-duration plan),
 # DRAFTS_PER_RUN=10, HOT_LEAD_THRESHOLD=5,
@@ -296,6 +301,34 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
   requires `DASHBOARD_PASSWORD` in `.env.local` too.** Task 1.3 hardening also landed
   (regex escape, campaign/suppression input validation, timing-safe cron compare,
   health 503 redaction, OAuth bootstrap 404 outside dev unless `ALLOW_OAUTH_BOOTSTRAP`).
+- **Security phase 2 (2026-07-31, branch `security-phase-2`)** — a DB + login audit.
+  **The critical finding: the session cookie was `<expiry>.HMAC-SHA256_DASHBOARD_PASSWORD(<expiry>)`
+  with the expiry in cleartext, i.e. an offline password-cracking oracle at one SHA-256
+  per guess.** Any cookie that ever leaked yielded the password, and with it the DB, the
+  Gmail send/read integration, and the Anthropic spend. What changed:
+  - **`SESSION_SECRET` is now the HMAC key** and is never the password. Token format is
+    `v2.<jti>.<issuedAt>.<expiresAt>.<hmac>`, signed over the raw prefix substring; the old
+    2-part format is rejected with **no fallback**, so deploying this logs everyone out.
+    Cookie is `__Host-session`, `SameSite=Strict`, 7-day (was 30).
+  - **Revocation model:** there is no server-side session store (deliberate for a single-user
+    tool). `POST /api/auth/logout` clears the cookie; **rotating `SESSION_SECRET` is the only
+    way to invalidate a cookie that has already leaked.** A `jti` is in the token so a
+    denylist can be added later without another format change.
+  - **`requireSession()` (`src/lib/auth.ts`) now guards all 32 handlers across 20 route files.**
+    `src/proxy.ts` was previously the *only* authorization check in the app. The guard also
+    does the **CSRF Origin check** on mutating methods — which means **`APP_BASE_URL` must
+    exactly match the browser's origin in production or every POST/PATCH/DELETE returns 403.**
+  - Login is rate limited (Mongo-backed `LoginAttempt`, TTL 15 min; 5/IP + 20 global) and
+    logs successes and failures. `DASHBOARD_PASSWORD` under 12 chars fails closed.
+  - **Scoring semantics changed:** `engagementScore` is bumped only on the *first* open/click,
+    because the tracking endpoints are public and anyone replaying a pixel URL could otherwise
+    inflate the hot-lead score without limit. `openCount`/`clickCount` still count every hit.
+  - Every model has `maxlength` now, so **anything writing third-party or CSV-derived text must
+    truncate first** — `replies.ts` (replyBody), `sequence.ts` (lastSendError) and `contacts.ts`
+    (`FIELD_CAPS`/`cap()`) do. Skipping this turns one over-long CSV cell into a failed import.
+  - `/api/auth/gmail/callback` is **public in the proxy on purpose**: Google redirects to it
+    cross-site and `SameSite=Strict` makes the session cookie structurally unavailable there.
+    It is guarded by its dev-only 404 gate plus a new OAuth `state` cookie check instead.
 - **`maxDuration = 300`** on cron routes is a harmless ceiling request. Deploy target
   is Hobby, which may cap it to 60 s — that is now fine (Task 4.2 resolved Q1/Q5):
   `SENDS_PER_RUN=1` default with no inter-send sleep in the cron path keeps a single
@@ -427,7 +460,8 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys → disable key → create new → update env + redeploy (spend cap limits damage meanwhile) |
 | `MONGODB_URI` password | Atlas → Database Access → Edit user → new password → update env + redeploy |
 | `CRON_SECRET` | New random value → update Vercel + pinger together → redeploy |
-| `DASHBOARD_PASSWORD` | New value in Vercel → redeploy (sessions derived from it invalidate) |
+| `DASHBOARD_PASSWORD` | New value in Vercel → redeploy. **Note: since 2026-07-31 sessions are NOT derived from the password, so changing it does NOT log anyone out** — rotate `SESSION_SECRET` too if that is what you want |
+| `SESSION_SECRET` | New random 32+ char value in Vercel → redeploy. This is the **revocation lever**: every existing session cookie becomes invalid immediately. Use it if a cookie leaks or a device is lost |
 
 ### C. Periodic (every ~3 months, or when asked)
 

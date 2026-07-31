@@ -351,3 +351,57 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   Verified: tsc, 221 tests, production build all green. **Remaining plan phase: 6
   (product improvements — independent, post-go-live OK).**
 - **2026-07-06 → 07-07** — **Manual compose + UI send** built to unblock sending without the Anthropic key (specs/plans in docs/superpowers/, dated 2026-07-06 & 07-07). Subagent-driven-development workflow (Sonnet implementers, spec+quality review per task); merged to `main` fast-forward, verified tsc + `npm run build` (30 routes). Two feature sets: **(A) single manual send** — `sendOneLog` extracted from `src/lib/sequence.ts` (shared by cron + manual); `POST /api/email-logs` creates an `approved` log (supersedes "no POST by design"); `POST /api/send-batch` sends caller-specified approved logs (daily cap enforced, send-window intentionally NOT); Review Queue approved strip gained checkboxes + "Send N emails" button; sidebar `06 · Compose`. **(B) multi-contact compose** — `src/lib/compose.ts` `applyPlaceholders` ({{businessName}}/{{contactName}}, name fallback "there"); `POST /api/email-logs/batch` (per-contact auto stage = currentStage+1, skips duplicates/inactive/completed with reasons, returns {created, skipped[]}); `/compose` rewritten to a campaign-filtered recipient checklist (select-all, token hint, queued/skipped summary, no auto-redirect). Cron endpoint untouched — still works if AI key + pinger added later, but the pinger is now optional. Runtime/visual QA against live DB still pending user's credential setup. Note: pre-existing uncommitted working-tree edits to next.config.ts + src/components/ui.tsx remain unstaged (not part of this work).
+
+- **2026-07-31 — Security phase 2 (branch `security-phase-2`): database + login audit and remediation.**
+  Coordinator-reviewed Sonnet subagents, four waves by disjoint file ownership, committed per wave.
+  Verified at every gate with `npm test` + `npx tsc --noEmit` + `npm run build`, plus live probes
+  against the running app and the real Atlas DB — agent completion claims were not taken as evidence.
+  Tests 486 → 566.
+
+  **The critical finding:** `src/lib/session.ts` used the raw `DASHBOARD_PASSWORD` as the HMAC key
+  while transmitting the signed message (the expiry) in cleartext as the first half of the cookie.
+  The cookie was therefore `T || HMAC_password(T)` with `T` known — a self-contained offline
+  password-cracking oracle at one SHA-256 per guess, no salt, no KDF. One leaked cookie (shared
+  device, HAR file, TLS-terminating proxy, browser extension) yielded the password, and with it the
+  whole DB, the Gmail send/read integration, and the Anthropic spend.
+
+  **Wave A** — new required `SESSION_SECRET` keys the HMAC; token is now
+  `v2.<jti>.<issuedAt>.<expiresAt>.<hmac>` signed over the raw prefix substring, old 2-part format
+  rejected with no fallback. Cookie `__Host-session`, `SameSite=Strict`, 30d → 7d. Added
+  `POST /api/auth/logout` + sidebar control. Mongo-backed login rate limiting (`LoginAttempt`, TTL
+  15 min, 5/IP + 20 global) checked *before* the password compare; auth successes and failures are
+  now logged (they were silent). `DASHBOARD_PASSWORD` < 12 chars fails closed. Security headers
+  added to `next.config.ts` (there were none at all: HSTS, CSP, X-Frame-Options, nosniff,
+  Referrer-Policy, Permissions-Policy). `isPublicPath` fails closed on `%`/`..`/`//`
+  (encoded-traversal bypass class) and `/api/test/*` is no longer public. Gmail OAuth gained the
+  missing `state` parameter. `db.ts` got `strictQuery`, URI scheme validation and timeouts.
+
+  **Wave B** — `requireSession()` added to `src/lib/auth.ts` and applied to **all 32 handlers across
+  20 route files**; `src/proxy.ts` had been the only authorization check in the entire application.
+  It also performs the CSRF `Origin` check on mutating methods. Closed two confirmed NoSQL
+  operator-injection paths (`POST /api/contacts` and the import route's JSON branch, where
+  `campaignId: {"$ne": null}` turned a dedupe lookup into a cross-campaign email-existence oracle).
+
+  **Wave C** — limits on every list endpoint (`GET /api/email-logs` had been returning the entire
+  collection including every body and replyBody); `?stats=true` `$lookup` now projects 8 fields
+  instead of materialising every log body; import byte/row caps; `maxlength` on every model string
+  field with matching truncation at the third-party write sites; open redirect in `track/click`
+  closed with `safeRedirectUrl`.
+
+  **Behaviour changes worth knowing about (not pure hardening):**
+  1. **Deploying this logs everyone out** and requires `SESSION_SECRET` set first, or the app 503s.
+  2. **`engagementScore` now increments only on the FIRST open/click**, not every one. The tracking
+     endpoints are public, so replaying a pixel URL previously inflated the hot-lead score without
+     limit. `openCount`/`clickCount` still count every hit. Historical scores are unchanged, so
+     scores recorded before today are not comparable with ones recorded after.
+  3. **`APP_BASE_URL` must exactly match the browser's origin in production**, or the new Origin
+     check rejects every POST/PATCH/DELETE with 403.
+  4. `businessName` is now stored trimmed, and Contact text fields are truncated to the schema caps
+     rather than rejected — one over-long CSV cell would otherwise abort an entire import.
+
+  **Known limits, deliberately accepted:** no server-side session store, so a *leaked* cookie can
+  only be killed by rotating `SESSION_SECRET` (a `jti` is in the token so a denylist can be added
+  later without a format change); CSP uses `'unsafe-inline'` for scripts because Next's inline
+  bootstrap has no nonce pipeline here — `frame-ancestors`/`base-uri`/`form-action` are the
+  load-bearing directives; list endpoints are capped but not truly paginated (default 1000, max
+  5000) since the dashboard pages consume plain arrays — real pagination is the follow-up.
