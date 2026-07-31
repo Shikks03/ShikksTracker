@@ -7,7 +7,7 @@ export async function GET() {
   const uri = process.env.MONGODB_URI;
 
   if (!uri) {
-    return NextResponse.json({ ok: true, db: "unconfigured" });
+    return NextResponse.json({ ok: false, db: "unconfigured" }, { status: 503 });
   }
 
   try {

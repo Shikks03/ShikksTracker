@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 // still work unchanged.
 import { normalizeEmail, isValidEmail, escapeRegex } from "@/lib/email";
 export { normalizeEmail, isValidEmail };
+import { asObjectIdString, asString } from "@/lib/validate";
 
 type LeadSource = "cold_email" | "referral" | "event_connection" | "other";
 type OutreachChannel = "email" | "facebook" | "instagram" | "phone";
@@ -70,9 +71,29 @@ export async function createContactChecked(
 ): Promise<CreateContactResult> {
   await connectDB();
 
+  // Defence in depth: on the manual-add path, `input` comes straight from
+  // an unvalidated HTTP body. Without this check, an `input.campaignId` of
+  // e.g. `{ "$ne": null }` would flow unguarded into the Mongo filters
+  // below and turn the dedupe lookup into a cross-campaign existence oracle
+  // for arbitrary email addresses (a `{"$ne": null}` campaignId matches
+  // "any campaign", so a 409-vs-201 response leaks whether an email exists
+  // anywhere in the database). Validate once, up front, and use the
+  // validated string everywhere a campaignId reaches a query or an insert.
+  const validCampaignId = asObjectIdString(input.campaignId);
+  if (validCampaignId === null) {
+    return { outcome: "invalid", reason: "Invalid campaignId" };
+  }
+
   const channel = input.outreachChannel ?? "email";
 
   if (channel === "email") {
+    // input.contactEmail may be present-but-non-string on the unvalidated
+    // manual-add path (e.g. an object or array) — `?? ""` only catches
+    // null/undefined, so a bare typeof check comes first to avoid a
+    // TypeError out of normalizeEmail's .trim() surfacing as a generic 500.
+    if (input.contactEmail !== undefined && typeof input.contactEmail !== "string") {
+      return { outcome: "invalid", reason: "Invalid email format" };
+    }
     const normalizedEmail = normalizeEmail(input.contactEmail ?? "");
 
     // 1. Validate email format
@@ -89,7 +110,7 @@ export async function createContactChecked(
     // 3. Check for existing contact in the same campaign
     const existing = await Contact.findOne({
       contactEmail: normalizedEmail,
-      campaignId: input.campaignId,
+      campaignId: validCampaignId,
     }).lean();
     if (existing) {
       return { outcome: "duplicate" };
@@ -104,7 +125,7 @@ export async function createContactChecked(
       contactName: input.contactName,
       keyPoints: input.keyPoints,
       leadSource: input.leadSource ?? "cold_email",
-      campaignId: input.campaignId,
+      campaignId: validCampaignId,
       importMethod,
       nextSendAt: new Date(),
       unsubscribeToken: randomUUID(),
@@ -157,17 +178,31 @@ export async function createContactChecked(
   // completes. A fully robust fix needs a normalized stored key plus a
   // partial unique index, which is a schema/migration change out of scope
   // here.
-  const existing = input.sourcePlaceId
+  //
+  // sourcePlaceId and businessName are guarded with asString before they
+  // reach a query filter — same unvalidated-manual-add-body concern as
+  // campaignId above. businessName additionally feeds an anchored $regex
+  // (via escapeRegex), so its length is capped at 200 to keep the compiled
+  // pattern bounded.
+  const validSourcePlaceId = asString(input.sourcePlaceId, 200);
+  const validBusinessName = asString(input.businessName, 200);
+  if (validBusinessName === null) {
+    return {
+      outcome: "invalid",
+      reason: `Missing or invalid businessName for ${channel} contact`,
+    };
+  }
+  const existing = validSourcePlaceId
     ? await Contact.findOne({
-        sourcePlaceId: input.sourcePlaceId,
-        campaignId: input.campaignId,
+        sourcePlaceId: validSourcePlaceId,
+        campaignId: validCampaignId,
       }).lean()
     : await Contact.findOne({
         businessName: {
-          $regex: `^${escapeRegex(input.businessName.trim())}$`,
+          $regex: `^${escapeRegex(validBusinessName)}$`,
           $options: "i",
         },
-        campaignId: input.campaignId,
+        campaignId: validCampaignId,
       }).lean();
   if (existing) {
     return { outcome: "duplicate" };
@@ -176,19 +211,19 @@ export async function createContactChecked(
   // 4. Insert with channel/provenance fields, omitting any that are empty strings
   // so schema defaults / the sparse indexes behave correctly.
   const contact = await Contact.create({
-    businessName: input.businessName,
+    businessName: validBusinessName,
     ...(normalizedEmail ? { contactEmail: normalizedEmail } : {}),
     contactName: input.contactName,
     keyPoints: input.keyPoints,
     leadSource: input.leadSource ?? "cold_email",
-    campaignId: input.campaignId,
+    campaignId: validCampaignId,
     importMethod,
     outreachChannel: channel,
     ...(input.phone ? { phone: input.phone } : {}),
     ...(input.facebook ? { facebook: input.facebook } : {}),
     ...(input.instagram ? { instagram: input.instagram } : {}),
     ...(input.website ? { website: input.website } : {}),
-    ...(input.sourcePlaceId ? { sourcePlaceId: input.sourcePlaceId } : {}),
+    ...(validSourcePlaceId ? { sourcePlaceId: validSourcePlaceId } : {}),
     ...(input.webPresenceTier ? { webPresenceTier: input.webPresenceTier } : {}),
     ...(input.claimed ? { claimed: input.claimed } : {}),
     // NOT the truthiness pattern used above: 0 is a valid, meaningful day

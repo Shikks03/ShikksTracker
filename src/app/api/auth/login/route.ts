@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSessionToken, COOKIE_NAME, MAX_AGE_SECONDS } from "@/lib/session";
+import {
+  createSessionToken,
+  assertSessionSecret,
+  COOKIE_NAME,
+  MAX_AGE_SECONDS,
+} from "@/lib/session";
+import {
+  checkLoginRateLimit,
+  recordLoginFailure,
+  clearLoginFailures,
+  getClientIp,
+} from "@/lib/loginRateLimit";
 
 /**
  * POST /api/auth/login
@@ -9,13 +20,41 @@ import { createSessionToken, COOKIE_NAME, MAX_AGE_SECONDS } from "@/lib/session"
  * On success: sets a signed HttpOnly session cookie and returns { ok: true }.
  * On failure: returns 401 { error: "Invalid password" }.
  *
- * No rate limiting — single-user tool, out of scope for v1.
+ * Rate limited (Mongo-backed, per-IP strict + global loose — see
+ * src/lib/loginRateLimit.ts) — locked-out requests get a 429 before the
+ * password is even compared. Failures and successes are logged (IP + outcome
+ * only, never the attempted password).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) {
     return NextResponse.json(
       { error: "DASHBOARD_PASSWORD is not configured." },
+      { status: 503 }
+    );
+  }
+
+  if (password.length < 12) {
+    return NextResponse.json(
+      {
+        error:
+          "DASHBOARD_PASSWORD is too weak (must be at least 12 characters). Fix the configured password before logging in.",
+      },
+      { status: 503 }
+    );
+  }
+
+  let sessionSecret: string;
+  try {
+    sessionSecret = assertSessionSecret();
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "SESSION_SECRET is not configured.",
+      },
       { status: 503 }
     );
   }
@@ -37,6 +76,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (!provided) {
     return NextResponse.json({ error: "Missing password field." }, { status: 400 });
+  }
+
+  const ip = getClientIp(request);
+
+  const { locked, retryAfterSeconds } = await checkLoginRateLimit(ip);
+  if (locked) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again later." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    );
   }
 
   // Constant-time compare via Web Crypto to avoid timing attacks.
@@ -64,16 +113,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const passwordMatch = diff === 0;
 
   if (!passwordMatch) {
+    await recordLoginFailure(ip);
+    console.warn(`[auth/login] ${new Date().toISOString()} ip=${ip} outcome=failure`);
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
-  const token = await createSessionToken(password);
+  await clearLoginFailures(ip);
+  console.info(`[auth/login] ${new Date().toISOString()} ip=${ip} outcome=success`);
+
+  const token = await createSessionToken(sessionSecret);
 
   const response = NextResponse.json({ ok: true });
+  // __Host- prefix requires: secure=true, path="/", and no Domain attribute.
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     maxAge: MAX_AGE_SECONDS,
   });

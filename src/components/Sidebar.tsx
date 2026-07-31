@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { LogOut } from "lucide-react";
 import { useNextSendCountdown } from "./useNextSendCountdown";
 
 const NAV_ITEMS = [
@@ -52,6 +53,15 @@ export default function Sidebar() {
     load();
     return () => { cancelled = true; };
   }, [pathname]);
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // network hiccup — still redirect, the cookie may already be stale
+    }
+    window.location.href = "/login";
+  }
 
   return (
     <aside
@@ -256,6 +266,31 @@ export default function Sidebar() {
             Shikks
           </span>
         </div>
+
+        {/* Log out — visually subordinate to nav + user chip */}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="sidebar-nav-inactive"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 14,
+            padding: "8px 14px",
+            border: "none",
+            borderRadius: 6,
+            backgroundColor: "transparent",
+            color: "#6E6653",
+            fontFamily: grotesk,
+            fontSize: 13,
+            cursor: "pointer",
+            width: "100%",
+          }}
+        >
+          <LogOut size={13} strokeWidth={2} />
+          Log out
+        </button>
       </div>
     </aside>
   );

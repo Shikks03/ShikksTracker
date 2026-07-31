@@ -59,6 +59,13 @@ function isValidStage(s: unknown): s is 1 | 2 | 3 {
  * Returns: { subject: string, body: string, html: string }
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  if (
+    process.env.NODE_ENV !== "development" &&
+    process.env.ALLOW_TEST_ROUTES !== "true"
+  ) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const authError = requireCronSecret(request);
   if (authError) return authError;
 

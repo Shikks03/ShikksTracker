@@ -7,7 +7,6 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/session";
  * Public paths:
  *   /api/track/*       — recipient-facing pixel/click endpoints
  *   /api/cron/*        — guarded by x-cron-secret; leave that mechanism intact
- *   /api/test/*        — guarded by x-cron-secret
  *   /api/health        — exact match
  *   /login             — exact match (the login page itself)
  *   /api/auth/login    — exact match (the login POST handler)
@@ -15,12 +14,24 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/session";
  *   /favicon.ico       — static asset
  *
  * NOTE: /api/auth/gmail* is deliberately NOT public — it stays behind the session.
+ * NOTE: /api/test/* is deliberately NOT public — those routes send real mail and
+ * spend Anthropic credits, and are gated separately by their own dev-only check
+ * plus x-cron-secret.
  */
 function isPublicPath(pathname: string): boolean {
+  // Fail closed on any encoded-traversal / bypass-prone pathname. URL parsing
+  // resolves literal "../" segments but does NOT percent-decode, so something
+  // like "/api/track/%2e%2e/%2e%2e/contacts" would still pass a startsWith()
+  // prefix check below while actually routing elsewhere once decoded. Treat
+  // any pathname containing "%", "..", or "//" as protected rather than trying
+  // to enumerate every bypass encoding.
+  if (pathname.includes("%") || pathname.includes("..") || pathname.includes("//")) {
+    return false;
+  }
+
   if (
     pathname.startsWith("/api/track/") ||
     pathname.startsWith("/api/cron/") ||
-    pathname.startsWith("/api/test/") ||
     pathname.startsWith("/api/unsubscribe/") || // recipients click this; they are NOT logged in
     pathname.startsWith("/_next/")
   ) {
@@ -49,25 +60,37 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
+  // Fail closed: both secrets must be configured.
+  //
+  // DASHBOARD_PASSWORD gates /api/auth/login; SESSION_SECRET is the HMAC key for
+  // the session cookie. They are deliberately DIFFERENT secrets — the cookie must
+  // never be a derivation of the password, or a leaked cookie becomes an offline
+  // password-cracking oracle (see the docblock in src/lib/session.ts). Verify with
+  // SESSION_SECRET only; the password is never used as a key here.
   const password = process.env.DASHBOARD_PASSWORD;
+  const sessionSecret = process.env.SESSION_SECRET;
+  const missing = !password
+    ? "DASHBOARD_PASSWORD"
+    : !sessionSecret || sessionSecret.length < 32
+      ? "SESSION_SECRET (must be at least 32 characters)"
+      : null;
 
-  // Fail closed: DASHBOARD_PASSWORD must be configured
-  if (!password) {
+  if (missing) {
     if (isApiPath(pathname)) {
       return NextResponse.json(
-        { error: "DASHBOARD_PASSWORD is not configured." },
+        { error: `${missing} is not configured.` },
         { status: 503 }
       );
     }
     return new NextResponse(
-      "Service unavailable: DASHBOARD_PASSWORD must be configured before the dashboard can be accessed.",
+      `Service unavailable: ${missing} must be configured before the dashboard can be accessed.`,
       { status: 503, headers: { "Content-Type": "text/plain" } }
     );
   }
 
   // Validate session cookie
   const token = request.cookies.get(COOKIE_NAME)?.value ?? "";
-  const valid = token ? await verifySessionToken(token, password) : false;
+  const valid = token ? await verifySessionToken(token, sessionSecret!) : false;
 
   if (valid) {
     return NextResponse.next();

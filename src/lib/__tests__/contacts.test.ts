@@ -13,6 +13,12 @@
  * No DB integration harness exists in this project — models are vi.mock-ed,
  * matching the style already used for advanceContactAfterSend in
  * sequence.test.ts.
+ *
+ * campaignId fixtures below use a real 24-hex ObjectId string
+ * ("507f1f77bcf86cd799439011") rather than an arbitrary label like
+ * "campaign-1" — createContactChecked now validates campaignId with
+ * asObjectIdString() (security-phase-2) before it reaches any query filter,
+ * so a non-ObjectId string is rejected as an "invalid" outcome up front.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -166,7 +172,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
       {
         businessName: "SUNRISE CAFE",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "facebook",
         facebook: "https://facebook.com/sunrisecafe",
       },
@@ -176,7 +182,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
     expect(result.outcome).toBe("duplicate");
     expect(Contact.findOne).toHaveBeenCalledTimes(1);
     const queryArg = (Contact.findOne as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(queryArg.campaignId).toBe("campaign-1");
+    expect(queryArg.campaignId).toBe("507f1f77bcf86cd799439011");
     expect(queryArg.businessName.$options).toBe("i");
     // Anchored so "Sunrise Cafeteria" does not falsely match "Sunrise Cafe"
     expect(queryArg.businessName.$regex.startsWith("^")).toBe(true);
@@ -194,7 +200,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
       {
         businessName: "Mang Inasal (Session Rd.)",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "phone",
         phone: "09171234567",
       },
@@ -221,7 +227,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
       {
         businessName: "  Bakeshop  ",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "instagram",
         instagram: "@bakeshop",
       },
@@ -241,7 +247,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
       {
         businessName: "Some Business",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "facebook",
         facebook: "https://facebook.com/somebusiness",
         sourcePlaceId: "place-123",
@@ -252,7 +258,7 @@ describe("createContactChecked — non-email channel businessName dedupe", () =>
     expect(result.outcome).toBe("duplicate");
     expect(Contact.findOne).toHaveBeenCalledWith({
       sourcePlaceId: "place-123",
-      campaignId: "campaign-1",
+      campaignId: "507f1f77bcf86cd799439011",
     });
   });
 });
@@ -274,7 +280,7 @@ describe("createContactChecked — recentReviewDays", () => {
       {
         businessName: "Fresh Review Cafe",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "facebook",
         facebook: "https://facebook.com/freshreviewcafe",
         recentReviewDays: 0,
@@ -297,7 +303,7 @@ describe("createContactChecked — recentReviewDays", () => {
       {
         businessName: "Unknown Age Cafe",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "phone",
         phone: "09171234567",
       },
@@ -319,7 +325,7 @@ describe("createContactChecked — recentReviewDays", () => {
       {
         businessName: "Old Review Cafe",
         keyPoints: "kp",
-        campaignId: "campaign-1",
+        campaignId: "507f1f77bcf86cd799439011",
         outreachChannel: "instagram",
         instagram: "@oldreviewcafe",
         recentReviewDays: 365,

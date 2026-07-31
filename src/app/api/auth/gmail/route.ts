@@ -39,12 +39,30 @@ export async function GET(): Promise<NextResponse> {
   const redirectUri = `${appBaseUrl}/api/auth/gmail/callback`;
   const auth = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 
+  // CSRF protection: bind this authorization attempt to a random state value
+  // stored in a short-lived cookie, verified by the callback before any code
+  // exchange happens. Without this, an attacker can walk a logged-in operator
+  // through a callback carrying the ATTACKER's authorization code, tricking
+  // them into installing the attacker's refresh token.
+  const state = crypto.randomUUID();
+
   const url = auth.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES,
     redirect_uri: redirectUri,
+    state,
   });
 
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.cookies.set("gmail_oauth_state", state, {
+    maxAge: 600,
+    httpOnly: true,
+    secure: true,
+    // "lax" (not "strict") is required: this cookie must survive Google's
+    // cross-site redirect back to our callback.
+    sameSite: "lax",
+    path: "/",
+  });
+  return response;
 }

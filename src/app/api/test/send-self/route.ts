@@ -5,6 +5,13 @@ import { getGmailClient, getSenderAddress, sendGmailMessage } from "@/lib/gmail"
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  if (
+    process.env.NODE_ENV !== "development" &&
+    process.env.ALLOW_TEST_ROUTES !== "true"
+  ) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const authError = requireCronSecret(request);
   if (authError) return authError;
 
@@ -23,8 +30,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     console.error("[test/send-self]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Send failed" }, { status: 500 });
   }
 }
