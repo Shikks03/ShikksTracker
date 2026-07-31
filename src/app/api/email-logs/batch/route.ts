@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
-import { handleError } from "@/lib/api";
+import { handleError, toClientMessage } from "@/lib/api";
 import { isSubjectRequiredForChannels } from "@/lib/outreachLogs";
 import { isValidObjectId } from "mongoose";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ interface SkippedItem {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = (await request.json()) as Record<string, unknown>;
@@ -126,8 +129,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         created++;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        skipped.push({ businessName: String(id), reason: msg });
+        skipped.push({ businessName: String(id), reason: toClientMessage(err) });
       }
     }
 

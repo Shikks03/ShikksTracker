@@ -7,6 +7,8 @@ import { generateEmailDraft } from "@/lib/draft";
 import { handleError, notFound } from "@/lib/api";
 import type { IContact } from "@/models/Contact";
 import type { ICampaign } from "@/models/Campaign";
+import { asObjectIdString, badRequest } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -38,12 +40,16 @@ export async function POST(
   request: NextRequest,
   { params }: RouteContext
 ): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid email log id");
+    await connectDB();
 
     // Load the EmailLog
-    const log = await EmailLog.findById(id).lean();
+    const log = await EmailLog.findById(validId).lean();
     if (!log) return notFound(id);
 
     // Only drafts can be regenerated — approved/sending/sent are immutable
@@ -136,7 +142,7 @@ export async function POST(
     // *requires* subject when channel === "email" (a non-email log's subject
     // was already ""), so this never blanks out a real subject line.
     const updated = await EmailLog.findByIdAndUpdate(
-      id,
+      validId,
       { subject: newDraft.subject, body: newDraft.body },
       { new: true, runValidators: true }
     ).lean();

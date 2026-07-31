@@ -5,6 +5,8 @@ import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
 import { isSubjectRequiredForChannel } from "@/lib/outreachLogs";
 import { EMAIL_CHANNEL_QUERY } from "@/lib/sequence";
+import { asObjectIdString } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +71,8 @@ export function applyChannelFilter(
 }
 
 export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const { searchParams } = request.nextUrl;
@@ -79,8 +83,20 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");
     const channel = searchParams.get("channel");
 
-    if (contactId) filter.contactId = contactId;
-    if (campaignId) filter.campaignId = campaignId;
+    if (contactId) {
+      const validContactId = asObjectIdString(contactId);
+      if (validContactId === null) {
+        return NextResponse.json({ error: "Invalid contactId" }, { status: 400 });
+      }
+      filter.contactId = validContactId;
+    }
+    if (campaignId) {
+      const validCampaignId = asObjectIdString(campaignId);
+      if (validCampaignId === null) {
+        return NextResponse.json({ error: "Invalid campaignId" }, { status: 400 });
+      }
+      filter.campaignId = validCampaignId;
+    }
     if (status) filter.status = status;
     // Additive, optional filter (Phase 4 multi-channel): the email review
     // queue (/review) now passes channel=email so social/phone drafts don't
@@ -117,13 +133,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = (await request.json()) as Record<string, unknown>;
 
     const { contactId, stage, subject, body: emailBody } = body;
 
-    if (!contactId || typeof contactId !== "string") {
+    const validContactId = asObjectIdString(contactId);
+    if (validContactId === null) {
       return NextResponse.json({ error: "contactId is required" }, { status: 400 });
     }
     if (stage !== 1 && stage !== 2 && stage !== 3) {
@@ -133,9 +152,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 
-    const contact = await Contact.findById(contactId).lean();
+    const contact = await Contact.findById(validContactId).lean();
     if (!contact) {
-      return NextResponse.json({ error: `Contact not found: ${contactId}` }, { status: 404 });
+      return NextResponse.json({ error: `Contact not found: ${validContactId}` }, { status: 404 });
     }
 
     // Legacy contacts saved before outreachChannel existed fall back to

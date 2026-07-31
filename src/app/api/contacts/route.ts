@@ -5,12 +5,19 @@ import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
 import { createContactChecked, CreateContactInput } from "@/lib/contacts";
 import { envInt } from "@/lib/env";
+import { asObjectIdString, asOptionalString, asString } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 const HOT_LEAD_THRESHOLD = envInt("HOT_LEAD_THRESHOLD", 5);
 
+const VALID_LEAD_SOURCE_INPUT = new Set(["cold_email", "referral", "event_connection", "other"]);
+const VALID_OUTREACH_CHANNEL_INPUT = new Set(["email", "facebook", "instagram", "phone"]);
+
 export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const { searchParams } = request.nextUrl;
@@ -197,8 +204,79 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    const body = (await request.json()) as CreateContactInput;
+    const rawBody = (await request.json()) as Record<string, unknown>;
+
+    // `request.json() as CreateContactInput` is a compile-time-only cast —
+    // it performs zero runtime validation, so an unvalidated field (e.g.
+    // campaignId as `{"$ne": null}`) would otherwise flow straight into
+    // createContactChecked. Build an explicitly whitelisted, type-checked
+    // input object instead. createContactChecked re-validates defensively
+    // too (belt and suspenders), but the route boundary is where a clean
+    // 400 belongs.
+    const campaignId = asObjectIdString(rawBody.campaignId);
+    if (campaignId === null) {
+      return NextResponse.json({ error: "Invalid or missing campaignId" }, { status: 400 });
+    }
+    const businessName = asString(rawBody.businessName, 200);
+    if (businessName === null) {
+      return NextResponse.json({ error: "Invalid or missing businessName" }, { status: 400 });
+    }
+    const keyPoints = asString(rawBody.keyPoints, 5000);
+    if (keyPoints === null) {
+      return NextResponse.json({ error: "Invalid or missing keyPoints" }, { status: 400 });
+    }
+
+    let leadSource: CreateContactInput["leadSource"];
+    if (rawBody.leadSource !== undefined) {
+      if (typeof rawBody.leadSource !== "string" || !VALID_LEAD_SOURCE_INPUT.has(rawBody.leadSource)) {
+        return NextResponse.json({ error: "Invalid leadSource" }, { status: 400 });
+      }
+      leadSource = rawBody.leadSource as CreateContactInput["leadSource"];
+    }
+
+    let outreachChannel: CreateContactInput["outreachChannel"];
+    if (rawBody.outreachChannel !== undefined) {
+      if (
+        typeof rawBody.outreachChannel !== "string" ||
+        !VALID_OUTREACH_CHANNEL_INPUT.has(rawBody.outreachChannel)
+      ) {
+        return NextResponse.json({ error: "Invalid outreachChannel" }, { status: 400 });
+      }
+      outreachChannel = rawBody.outreachChannel as CreateContactInput["outreachChannel"];
+    }
+
+    let recentReviewDays: number | undefined;
+    // 0 is a valid, meaningful day count (reviewed today) and is falsy —
+    // explicit `!== undefined` check, not truthiness (documented invariant).
+    if (rawBody.recentReviewDays !== undefined) {
+      const v = rawBody.recentReviewDays;
+      if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v) || v < 0) {
+        return NextResponse.json({ error: "Invalid recentReviewDays" }, { status: 400 });
+      }
+      recentReviewDays = v;
+    }
+
+    const body: CreateContactInput = {
+      campaignId,
+      businessName,
+      keyPoints,
+      contactEmail: asOptionalString(rawBody.contactEmail, 320),
+      contactName: asOptionalString(rawBody.contactName, 200),
+      phone: asOptionalString(rawBody.phone, 50),
+      facebook: asOptionalString(rawBody.facebook, 500),
+      instagram: asOptionalString(rawBody.instagram, 500),
+      website: asOptionalString(rawBody.website, 500),
+      sourcePlaceId: asOptionalString(rawBody.sourcePlaceId, 200),
+      webPresenceTier: asOptionalString(rawBody.webPresenceTier, 50),
+      claimed: asOptionalString(rawBody.claimed, 50),
+      ...(leadSource !== undefined ? { leadSource } : {}),
+      ...(outreachChannel !== undefined ? { outreachChannel } : {}),
+      ...(recentReviewDays !== undefined ? { recentReviewDays } : {}),
+    };
+
     const result = await createContactChecked(body, "manual");
 
     switch (result.outcome) {

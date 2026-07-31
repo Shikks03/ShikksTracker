@@ -41,6 +41,15 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/api/health" ||
     pathname === "/login" ||
     pathname === "/api/auth/login" ||
+    // Google redirects the browser here cross-site, and the session cookie is
+    // SameSite=Strict — so it is structurally impossible for this endpoint to
+    // ever receive it. Leaving it "protected" would not secure it, it would
+    // simply make the OAuth bootstrap unusable. It is guarded instead by its
+    // own three controls: a 404 outside development (unless
+    // ALLOW_OAUTH_BOOTSTRAP=true), and the `state` cookie check that rejects a
+    // callback the browser did not initiate from /api/auth/gmail. The
+    // initiating route itself stays behind the session.
+    pathname === "/api/auth/gmail/callback" ||
     pathname === "/favicon.ico"
   ) {
     return true;

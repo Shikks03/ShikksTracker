@@ -8,6 +8,7 @@ import {
   isNonEmailChannel,
   resolveOutreachLogStatusFilter,
 } from "@/lib/outreachLogs";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,8 @@ export const dynamic = "force-dynamic";
  * `contact: null` — the board has nothing useful to render for them.
  */
 export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const { searchParams } = request.nextUrl;

@@ -4,6 +4,7 @@ import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError } from "@/lib/api";
 import mongoose from "mongoose";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +21,20 @@ const PIPELINE_STAGES = [
 ] as const;
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
 
-    // Validate id before using in aggregation
+    // Validate id before using in aggregation (and before connectDB — a
+    // malformed id should cost no DB round trip).
     if (!mongoose.isValidObjectId(id)) {
       return NextResponse.json({ error: "Invalid campaign id" }, { status: 400 });
     }
+    await connectDB();
     const campaignObjId = new mongoose.Types.ObjectId(id);
 
     // Funnel: contacts in this campaign that have >=1 sent log (sent), opened, clicked, replied

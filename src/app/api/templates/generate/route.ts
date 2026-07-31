@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleError } from "@/lib/api";
 import { generateTemplateDraft } from "@/lib/draft";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ export const dynamic = "force-dynamic";
  * Session-cookie protected via proxy.ts (logged-in browser action).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     const body = (await request.json()) as { brief?: unknown; tone?: unknown };
 

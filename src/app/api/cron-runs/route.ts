@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import CronRun from "@/models/CronRun";
 import { handleError } from "@/lib/api";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const { searchParams } = request.nextUrl;

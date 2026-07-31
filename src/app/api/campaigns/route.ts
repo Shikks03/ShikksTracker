@@ -2,30 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Campaign from "@/models/Campaign";
 import { handleError } from "@/lib/api";
+import { validateSequenceSpacingDays } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Validate sequenceSpacingDays: must be an array of exactly 3 non-negative
- * numbers that are strictly increasing and start at 0.
- * Returns an error string on failure, or null if valid.
- */
-function validateSequenceSpacingDays(value: unknown): string | null {
-  if (!Array.isArray(value)) return "sequenceSpacingDays must be an array";
-  if (value.length !== 3) return "sequenceSpacingDays must have exactly 3 elements";
-  for (const item of value) {
-    if (typeof item !== "number" || !Number.isFinite(item) || item < 0) {
-      return "sequenceSpacingDays elements must be non-negative numbers";
-    }
-  }
-  if (value[0] !== 0) return "sequenceSpacingDays must start at 0";
-  if (value[1] <= value[0] || value[2] <= value[1]) {
-    return "sequenceSpacingDays must be strictly increasing";
-  }
-  return null;
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const campaigns = await Campaign.find().lean();
@@ -36,6 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = await request.json() as Record<string, unknown>;
@@ -63,11 +49,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.sequenceSpacingDays !== undefined) {
-      const err = validateSequenceSpacingDays(body.sequenceSpacingDays);
-      if (err) {
-        return NextResponse.json({ error: err }, { status: 400 });
+      const validated = validateSequenceSpacingDays(body.sequenceSpacingDays);
+      if (validated === null) {
+        return NextResponse.json(
+          { error: "sequenceSpacingDays must be an array of 3 strictly increasing non-negative integers starting at 0" },
+          { status: 400 }
+        );
       }
-      payload.sequenceSpacingDays = body.sequenceSpacingDays;
+      payload.sequenceSpacingDays = validated;
     }
     // If sequenceSpacingDays is omitted, the schema default [0, 5, 9] applies.
 

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import EmailLog from "@/models/EmailLog";
-import { handleError } from "@/lib/api";
+import { handleError, toClientMessage } from "@/lib/api";
 import { getManilaDayStart, sendOneLog, EMAIL_CHANNEL_QUERY } from "@/lib/sequence";
 import { envInt } from "@/lib/env";
+import { asObjectIdString } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +13,29 @@ const DAILY_SEND_CAP  = envInt("DAILY_SEND_CAP",  15);
 const SEND_BATCH_MAX  = envInt("SEND_BATCH_MAX",   5);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = (await request.json()) as Record<string, unknown>;
 
-    const { ids } = body;
-    if (!Array.isArray(ids) || ids.length === 0) {
+    const { ids: rawIds } = body;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
       return NextResponse.json(
         { error: "ids must be a non-empty array" },
+        { status: 400 }
+      );
+    }
+
+    // Elements were previously unvalidated `unknown` reaching a Mongo `$in`
+    // filter — filter to well-formed ObjectId strings only (same pattern as
+    // email-logs/batch/route.ts's isValidObjectId filter).
+    const ids = rawIds.filter(
+      (id): id is string => asObjectIdString(id) !== null
+    );
+    if (ids.length === 0) {
+      return NextResponse.json(
+        { error: "ids must contain at least one valid id" },
         { status: 400 }
       );
     }
@@ -83,7 +100,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         contactName: logResult.contactName,
         subject: logResult.subject,
         status: logResult.status,
-        ...(logResult.error ? { error: logResult.error } : {}),
+        // sendOneLog's `error` field can carry a raw Gmail/driver error
+        // message (e.g. on bounce or a non-bounce Gmail failure) — sequence.ts
+        // is out of scope here, so sanitize at this route boundary via
+        // toClientMessage rather than echoing driver text to the client. The
+        // real message is still logged server-side by toClientMessage.
+        ...(logResult.error ? { error: toClientMessage(new Error(logResult.error)) } : {}),
       });
     }
 

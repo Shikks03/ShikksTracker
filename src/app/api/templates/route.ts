@@ -3,10 +3,13 @@ import { connectDB } from "@/lib/db";
 import Template from "@/models/Template";
 import { handleError } from "@/lib/api";
 import { validateTemplateBody } from "@/lib/templates";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     // Newest first; _id sort is equivalent to createdAt sort and avoids
@@ -19,6 +22,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = (await request.json()) as Record<string, unknown>;

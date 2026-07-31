@@ -7,6 +7,7 @@ import { isValidEmail, normalizeEmail } from "@/lib/contacts";
 // Was a private copy here until 2026-07-30; two identical escapers is exactly
 // the drift this codebase already had to clean up once (Task 5.1).
 import { escapeRegex } from "@/lib/email";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ const SUPPRESSION_REASONS = ["unsubscribed", "bounced", "manual"] as const;
 type SuppressionReason = typeof SUPPRESSION_REASONS[number];
 
 export async function GET(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const { searchParams } = request.nextUrl;
@@ -28,6 +31,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
     const body = await request.json() as Record<string, unknown>;

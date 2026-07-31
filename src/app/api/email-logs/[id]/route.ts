@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import EmailLog from "@/models/EmailLog";
 import { handleError, notFound } from "@/lib/api";
+import { asObjectIdString, badRequest } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +14,17 @@ type RouteContext = { params: Promise<{ id: string }> };
 // ---------------------------------------------------------------------------
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
-    const log = await EmailLog.findById(id).lean();
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid email log id");
+    await connectDB();
+    const log = await EmailLog.findById(validId).lean();
     if (!log) return notFound(id);
     return NextResponse.json(log);
   } catch (err) {
@@ -34,10 +40,14 @@ export async function PATCH(
   request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
-    const log = await EmailLog.findById(id);
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid email log id");
+    await connectDB();
+    const log = await EmailLog.findById(validId);
     if (!log) return notFound(id);
 
     // Blanket guard: "sent" and "sending" logs are immutable.
@@ -87,7 +97,7 @@ export async function PATCH(
       update.status = requested;
     }
 
-    const updated = await EmailLog.findByIdAndUpdate(id, update, {
+    const updated = await EmailLog.findByIdAndUpdate(validId, update, {
       new: true,
       runValidators: true,
     }).lean();
@@ -103,13 +113,17 @@ export async function PATCH(
 // ---------------------------------------------------------------------------
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
-    const log = await EmailLog.findById(id).lean();
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid email log id");
+    await connectDB();
+    const log = await EmailLog.findById(validId).lean();
     if (!log) return notFound(id);
 
     if (log.status !== "draft") {
@@ -119,7 +133,7 @@ export async function DELETE(
       );
     }
 
-    await EmailLog.findByIdAndDelete(id);
+    await EmailLog.findByIdAndDelete(validId);
     return NextResponse.json({ deleted: true });
   } catch (err) {
     return handleError(err);

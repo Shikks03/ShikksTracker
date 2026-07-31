@@ -10,6 +10,8 @@ import {
 } from "@/lib/scraperCsv";
 import { createContactChecked, normalizeEmail } from "@/lib/contacts";
 import { handleError } from "@/lib/api";
+import { asObjectIdString } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +64,8 @@ interface InvalidEntry {
  * }
  */
 export async function POST(request: NextRequest) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
     await connectDB();
 
@@ -80,10 +84,17 @@ export async function POST(request: NextRequest) {
         format?: string;
         defaultChannel?: string;
       };
-      if (!body.csvText) {
+      // typeof checks, not truthiness: an unvalidated `campaignId` of e.g.
+      // `{"$ne": null}` passes a bare `!body.campaignId` check (it is a
+      // truthy object) and would otherwise flow into Campaign.findById below,
+      // turning it into `findOne({_id:{$ne:null}})` — an arbitrary-campaign
+      // existence-gate bypass. asObjectIdString only ever returns a plain
+      // valid-ObjectId string, never the original value.
+      if (typeof body.csvText !== "string" || body.csvText.length === 0) {
         return NextResponse.json({ error: "csvText is required" }, { status: 400 });
       }
-      if (!body.campaignId) {
+      const validCampaignId = asObjectIdString(body.campaignId);
+      if (validCampaignId === null) {
         return NextResponse.json({ error: "campaignId is required" }, { status: 400 });
       }
       if (body.format !== undefined) {
@@ -105,7 +116,7 @@ export async function POST(request: NextRequest) {
         defaultChannel = body.defaultChannel as DefaultChannel;
       }
       csvText = body.csvText;
-      campaignId = body.campaignId;
+      campaignId = validCampaignId;
     } else {
       // multipart/form-data path
       const formData = await request.formData();
@@ -146,16 +157,25 @@ export async function POST(request: NextRequest) {
       campaignId = campaignIdField;
     }
 
+    // Validate campaignId is a well-formed ObjectId before it reaches a
+    // query — the JSON branch already guaranteed this above, but the
+    // multipart branch only checked `typeof === "string"`, so re-validate
+    // here to cover both paths uniformly.
+    const validatedCampaignId = asObjectIdString(campaignId);
+    if (validatedCampaignId === null) {
+      return NextResponse.json({ error: "Invalid campaignId" }, { status: 400 });
+    }
+
     // Validate campaignId exists
-    const campaign = await Campaign.findById(campaignId).lean();
+    const campaign = await Campaign.findById(validatedCampaignId).lean();
     if (!campaign) {
       return NextResponse.json({ error: `Not found: ${campaignId}` }, { status: 404 });
     }
 
     if (format === "scraper") {
-      return await handleScraperImport(csvText, campaignId, defaultChannel);
+      return await handleScraperImport(csvText, validatedCampaignId, defaultChannel);
     }
-    return await handleStandardImport(csvText, campaignId);
+    return await handleStandardImport(csvText, validatedCampaignId);
   } catch (err) {
     return handleError(err);
   }

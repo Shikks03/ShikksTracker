@@ -4,6 +4,8 @@ import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { handleError, notFound } from "@/lib/api";
 import { suppressContact } from "@/lib/contacts";
+import { asObjectIdString, badRequest } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,13 +25,17 @@ const UPDATABLE_FIELDS = [
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
-    const contact = await Contact.findById(id).lean();
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid contact id");
+    await connectDB();
+    const contact = await Contact.findById(validId).lean();
     if (!contact) return notFound(id);
     return NextResponse.json(contact);
   } catch (err) {
@@ -41,9 +47,13 @@ export async function PATCH(
   request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid contact id");
+    await connectDB();
     const body = await request.json() as Record<string, unknown>;
 
     const incomingStatus = body.status as string | undefined;
@@ -56,7 +66,7 @@ export async function PATCH(
       // deletes pending draft/approved logs. We pass reason = incomingStatus
       // which is narrowed to "unsubscribed" | "bounced" here.
       const reason = incomingStatus as "unsubscribed" | "bounced";
-      await suppressContact(id, reason);
+      await suppressContact(validId, reason);
 
       // Apply any OTHER updatable fields from the same PATCH (e.g. keyPoints,
       // businessName). Exclude "status" — suppressContact already wrote it —
@@ -68,11 +78,11 @@ export async function PATCH(
         if (field in body) otherUpdate[field] = body[field];
       }
       if (Object.keys(otherUpdate).length > 0) {
-        await Contact.findByIdAndUpdate(id, otherUpdate, { runValidators: true });
+        await Contact.findByIdAndUpdate(validId, otherUpdate, { runValidators: true });
       }
 
       // Return the final contact state (fresh read so all fields are current)
-      const updated = await Contact.findById(id).lean();
+      const updated = await Contact.findById(validId).lean();
       if (!updated) return notFound(id);
       return NextResponse.json(updated);
     }
@@ -116,7 +126,7 @@ export async function PATCH(
       if (field in body) update[field] = body[field];
     }
 
-    const contact = await Contact.findByIdAndUpdate(id, update, {
+    const contact = await Contact.findByIdAndUpdate(validId, update, {
       new: true,
       runValidators: true,
     }).lean();
@@ -128,15 +138,19 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ) {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
-    const contact = await Contact.findByIdAndDelete(id).lean();
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid contact id");
+    await connectDB();
+    const contact = await Contact.findByIdAndDelete(validId).lean();
     if (!contact) return notFound(id);
-    const { deletedCount } = await EmailLog.deleteMany({ contactId: id });
+    const { deletedCount } = await EmailLog.deleteMany({ contactId: validId });
     return NextResponse.json({ deleted: true, logsDeleted: deletedCount ?? 0 });
   } catch (err) {
     return handleError(err);

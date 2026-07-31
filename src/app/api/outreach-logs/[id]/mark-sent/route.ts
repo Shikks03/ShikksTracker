@@ -7,6 +7,8 @@ import { advanceContactAfterSend } from "@/lib/sequence";
 import { checkMarkSentAllowed, NON_EMAIL_CHANNEL_QUERY } from "@/lib/outreachLogs";
 import type { IEmailLog } from "@/models/EmailLog";
 import type { IContact } from "@/models/Contact";
+import { asObjectIdString, badRequest } from "@/lib/validate";
+import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -51,14 +53,18 @@ type RouteContext = { params: Promise<{ id: string }> };
  *      as if nothing were wrong.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ): Promise<NextResponse> {
+  const authError = await requireSession(request);
+  if (authError) return authError;
   try {
-    await connectDB();
     const { id } = await params;
+    const validId = asObjectIdString(id);
+    if (validId === null) return badRequest("Invalid email log id");
+    await connectDB();
 
-    const log = await EmailLog.findById(id).lean();
+    const log = await EmailLog.findById(validId).lean();
     if (!log) return notFound(id);
 
     const contact = (await Contact.findById(log.contactId).lean()) as IContact | null;
@@ -97,7 +103,7 @@ export async function POST(
       // an email log in disguise (see NON_EMAIL_CHANNEL_QUERY's doc comment).
       const now = new Date();
       const claimedDoc = (await EmailLog.findOneAndUpdate(
-        { _id: id, status: { $in: ["draft", "approved"] }, ...NON_EMAIL_CHANNEL_QUERY },
+        { _id: validId, status: { $in: ["draft", "approved"] }, ...NON_EMAIL_CHANNEL_QUERY },
         { status: "sent", sentAt: now, sentManuallyAt: now },
         { new: true }
       )) as IEmailLog | null;
