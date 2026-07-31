@@ -181,6 +181,61 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   (`sequence.ts`), which is why drafts correctly lack one — not a compliance gap.
   Tests 445 → 468; tsc and build clean.
 
+- **2026-07-31** — **Scraper review columns consumed; merged to `main` and deployed.**
+  Commit `84a0314` (branch `feature/scraper-review-text`, fast-forwarded into `main` and
+  pushed — production auto-deployed and was verified live).
+  **Upstream first:** the 2026-07-30 finding was written up as a brief for the separate
+  scraper repo, and the correct diagnosis turned out to be different from the first guess.
+  `panelRecentReview` was **never buggy** — its comment says it returns the freshest visible
+  review's *date* as a liveness proxy, which is exactly what it did. The real defect was a
+  **naming/contract mismatch**: the column was called `recent_review`, ShikksTracker read
+  that as prose, and the AI reasoned about a date. The scraper now emits **31 columns**,
+  adding `recent_review_text` (prose of an already-visible review) and `recent_review_days`
+  (the age in whole days, computed from a value `ageDays` already derived internally and
+  threw away). `recent_review` was deliberately NOT renamed — our parser matches headers by
+  name and returns `""` for a missing one, so a rename would have broken us silently.
+  **This side:** `parseScraperCsv` reads both new columns; `buildScraperKeyPoints` prefers
+  the real prose and falls back to the old column (still guarded by `isRelativeDateOnly`,
+  which keeps legacy 29-column exports working); a trailing "…" left by Maps' own truncation
+  is stripped before our 140-char cut; `recentReviewDays` is persisted on Contact for future
+  prospecting filters. New `parseRecentReviewDays` is permissive-in/strict-out — empty,
+  non-numeric, negative and non-finite all become `undefined`, while `0` is preserved.
+  **Two subtle correctness points worth keeping:** (a) `truncateOnWordBoundary` is now
+  code-point-safe — real review text contains emoji, and the old `String.slice` counted
+  UTF-16 units, so it could cut a surrogate pair in half and emit U+FFFD; verified 0 broken
+  characters across the real export. (b) `recentReviewDays` is spread with an explicit
+  `!== undefined` check rather than the truthiness pattern its string siblings use, because
+  `0` days is meaningful and falsy.
+  **DELIBERATE OMISSION (do not "improve" this):** no recency phrasing derived from the age
+  ever enters `keyPoints`. Maps sorts reviews by relevance, not recency, so the freshest
+  *visible* review is not provably the newest — putting "last reviewed X ago" in the prompt
+  would reinvite the exact false claim this whole thread of work removed.
+  Verified against a real 16-row export: 7 rows now carry a genuine review quote, 14 carry a
+  day count, 0 broken characters. Tests 468 → 486; tsc + build clean.
+  **Data refresh:** only **5 of 14** existing scraped contacts could be refreshed — the new
+  scrape covered a partly different set of businesses, so 9 aren't in it and still have
+  quote-less keyPoints and no day count. They need a re-scrape plus another refresh run.
+  **The importer cannot do this itself: it is insert-only and silently skips duplicates**
+  (`createContactChecked` returns `duplicate` and changes nothing). A "refresh on
+  re-import" mode — updating scraped provenance while leaving outreach state
+  (`currentStage`/`pipelineStage`/`engagementScore`/`nextSendAt`/logs) untouched — is an
+  open, unbuilt idea.
+  **Column coverage audit (user question):** of 31 columns, **9** become real Contact fields
+  (name, place_id, phone, facebook, instagram, website, web_presence_tier, claimed,
+  recent_review_days), **7** are baked into the `keyPoints` prose only and are therefore
+  unqueryable (rating, review_count, category, located_in, full_address, recent_review,
+  recent_review_text), **`tag`** is parsed into `ScraperRow` and never consumed by anything,
+  and **14** are never read. So you cannot currently filter or sort leads by rating or
+  review count. The user has asked (2026-07-31, explicitly deferred — do not design it yet)
+  for a per-business **profile** retaining most columns, **branch awareness** for multiple
+  locations of one business feeding the intro framing, and **"no website" as a priority
+  signal**.
+  **Environment gotcha:** killing the dev server mid-write left a torn
+  `.next/dev/types/validator.ts` (a `peof handler>` fragment overlapping the block above).
+  `tsconfig.json` includes `.next/dev/types/**/*.ts`, so `npx tsc --noEmit` failed with
+  TS1434/TS1005 inside a generated, gitignored file. `rm -rf .next` and re-run — it is never
+  a source regression.
+
 - **2026-07-04** — Project bootstrapped: SPEC.md copied in, CLAUDE.md and SESSION_NOTES.md created, spec open questions resolved by interview (see Decisions Locked). No code yet.
 - **2026-07-04 (later)** — Post-build fixes: HTML-escaped CSV-derived fields in the takeover alert email (security review finding, 715544a); fixed dashboard crash `campaigns.map is not a function` when the campaigns API returns an error object instead of an array — guarded the two unchecked fetches on `/` and `/import` (c1e218d). User has started running the app locally; next session continues from the "Pending user actions" list above (DB → Gmail OAuth → Anthropic key → deploy → pinger → warm-up batch).
 - **2026-07-04** — All 14 phases implemented in one session (Sonnet implementer subagents, per-phase spec+quality review by coordinator). Notable review catches fixed along the way: failed-connection caching in db.ts, literal `To: me` header in test-send, draft-cap starvation + approved-queue head-of-line blocking in the sequence engine, campaignId ObjectId cast in the stats aggregation. Everything verified via tsc + production build (27 routes); anything needing live credentials is deferred to the user actions above.

@@ -48,6 +48,11 @@ clicks "Mark sent". This was an MVP slice: `EmailLog` is deliberately NOT rename
   (default `"email"`), contact vectors `phone`/`facebook`/`instagram`/`website`, and scraper
   provenance `sourcePlaceId`/`webPresenceTier`/`claimed`. `contactEmail` is **conditionally
   required** — only when `outreachChannel === "email"`.
+  **Amendment (2026-07-31):** also `recentReviewDays?: number` — the age in whole days of
+  the most recent visible Google review, captured at import. Prospecting/filtering signal
+  only; it must **never** reach an AI prompt (rationale in `scraperCsv.ts`). It is spread
+  into `Contact.create` with an explicit `!== undefined` check, NOT the truthiness pattern
+  its string siblings use, because `0` days (reviewed today) is meaningful and falsy.
 - **EmailLog** gains `channel` (same enum, default `"email"`), `subject` required only for
   email, and `sentManuallyAt` (distinguishes a hand-logged send from a Gmail send).
 - **Indexes:** `{contactEmail, campaignId}` and `{sourcePlaceId, campaignId}` are both
@@ -178,7 +183,10 @@ src/
                        extension writes — without it the first header is "﻿name"
                        and every row silently fails to match), buildScraperKeyPoints
                        (deterministic personalisation string — load-bearing, it's what
-                       draft.ts opens with), deriveChannel (fb → ig → phone fallback)
+                       draft.ts opens with), deriveChannel (fb → ig → phone fallback),
+                       parseRecentReviewDays (string → number|undefined; "0" is valid).
+                       Truncation here is code-point-safe on purpose — real review text
+                       contains emoji, and a UTF-16 slice can split a surrogate pair.
     channels.ts        pure: normalizeHandleUrl/normalizeWebsiteUrl/telHref (scraped
                        handles may be full URLs, bare domains or "@handle"), CHANNEL_META
     outreachLogs.ts    NON_EMAIL_CHANNEL_QUERY, isNonEmailChannel, checkMarkSentAllowed
@@ -338,9 +346,22 @@ rewrite → Gmail send → persist sent state + rfcMessageId → advance stage/p
   SESSION_NOTES entry. **Still open by design:** `deriveChannel` ignores `website`, so a
   lead with a live site but no phone/socials cannot be imported at all; phone/DM drafts
   contain literal `[Your Name]`/`[Your Company]` (no sender identity feeds those prompts);
-  the locality heuristic can emit fragments like "Brgy-based Cafe". **Upstream, unfixed:**
-  the scraper's `recent_review` column captures the review's relative-date timestamp, not
-  its text — ShikksTracker now defends against it, but the fix belongs in the scraper repo.
+  the locality heuristic can emit fragments like "Brgy-based Cafe".
+  ~~**Upstream, unfixed:** the scraper's `recent_review` column captures the relative-date
+  timestamp, not the review text.~~ **RESOLVED UPSTREAM 2026-07-31.** The scraper now emits
+  **31 columns**, adding `recent_review_text` (the prose of an already-visible review) and
+  `recent_review_days` (that age in whole days); `recent_review` is unchanged and still
+  holds the relative date. ShikksTracker consumes both (`84a0314`) and prefers the real
+  prose. **`isRelativeDateOnly` stays** — legacy 29-column exports must keep working, and
+  `getField` returns `""` for an absent header so they parse unchanged. Expect roughly half
+  of rows to have **no** review text: the scraper performs no extra clicks by design, so a
+  blank is normal and must never be treated as an error.
+  **Import is insert-only.** `createContactChecked` returns `duplicate` and changes nothing
+  — there is no update or upsert path, so re-importing an updated CSV refreshes NOTHING.
+  Dedupe is `sourcePlaceId`+`campaignId` (preferred) else case-insensitive
+  `businessName`+`campaignId`, and is **per campaign**. Of the 31 columns, 9 become real
+  Contact fields, 7 are baked into the `keyPoints` prose only (so rating and review_count
+  are NOT queryable), `tag` is parsed and never consumed, and 14 are never read.
   Manual replies on social/phone have no detection — the user moves the pipeline stage by
   hand; the Gmail reply/alert engine stays email-only. Known future work: `EmailLog` is
   misnamed now that it carries social/phone logs (a rename to `OutreachLog` was
