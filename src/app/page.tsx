@@ -407,19 +407,21 @@ export default function Dashboard() {
       else if (error) setConfigError(`Couldn't load campaigns — ${error}`);
     });
 
-    // channel=email: this tile/header links to and mirrors /review, which
-    // lists EMAIL drafts only — an unfiltered count would include social/
-    // phone drafts that never appear in that queue.
-    apiFetch<{ length: number }[]>("/api/email-logs?status=draft&channel=email").then(
+    // channel=email: these tiles link to and mirror /review, which lists EMAIL
+    // drafts only — an unfiltered count would include social/phone drafts that
+    // never appear in that queue.
+    // count=true: both tiles render a bare number. They previously fetched the
+    // full log lists (every subject and body) just to read `.length`.
+    apiFetch<{ count: number }>("/api/email-logs?status=draft&channel=email&count=true").then(
       ({ data, error }) => {
-        if (Array.isArray(data)) setDraftCount(data.length);
+        if (typeof data?.count === "number") setDraftCount(data.count);
         else if (error) setConfigError(`Couldn't load draft count — ${error}`);
       }
     );
 
-    apiFetch<{ length: number }[]>("/api/email-logs?status=approved&channel=email").then(
+    apiFetch<{ count: number }>("/api/email-logs?status=approved&channel=email&count=true").then(
       ({ data, error }) => {
-        if (Array.isArray(data)) setApprovedCount(data.length);
+        if (typeof data?.count === "number") setApprovedCount(data.count);
         else if (error) setConfigError(`Couldn't load approved count — ${error}`);
       }
     );

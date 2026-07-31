@@ -34,11 +34,16 @@ export default function Sidebar() {
         // channel=email: the badge sits on "Review Queue", and /review lists
         // EMAIL drafts only — an unfiltered fetch here counts social/phone
         // drafts too and over-states the badge relative to what /review shows.
-        const res = await fetch("/api/email-logs?status=draft&channel=email");
+        // count=true: this effect re-runs on every route change, and the badge
+        // only needs a number — the previous list fetch pulled every draft's
+        // subject and body across the wire on each navigation.
+        const res = await fetch(
+          "/api/email-logs?status=draft&channel=email&count=true"
+        );
         if (!res.ok || cancelled) return;
-        const data: unknown = await res.json();
-        if (!cancelled && Array.isArray(data)) {
-          setDraftCount(data.length);
+        const data = (await res.json()) as { count?: number };
+        if (!cancelled && typeof data.count === "number") {
+          setDraftCount(data.count);
         }
       } catch {
         // silently swallow — badge stays hidden

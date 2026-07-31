@@ -95,6 +95,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // `?count=true` → `{ count }` via countDocuments instead of shipping every
+    // matching document. The sidebar badge and the dashboard draft/approved
+    // tiles only ever needed the number, but fetched full logs and read
+    // `.length` — downloading every draft's subject and body. The sidebar does
+    // that on *every* route change (its effect keys on `pathname`), so the cost
+    // was paid on each navigation and grows with the draft backlog.
+    // Deliberately reuses `filter` so status/channel/campaignId/contactId all
+    // behave identically to the list path — including the legacy-log handling
+    // in applyChannelFilter.
+    if (searchParams.get("count") === "true") {
+      const count = await EmailLog.countDocuments(filter);
+      return NextResponse.json({ count });
+    }
+
     const logs = await EmailLog.find(filter).lean();
     return NextResponse.json(logs);
   } catch (err) {
