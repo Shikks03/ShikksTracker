@@ -50,8 +50,12 @@ export interface IEmailLog extends Document {
 
 const LinkSchema = new Schema<IEmailLogLink>(
   {
-    url: { type: String, required: true },
-    trackingId: { type: String, required: true },
+    // 2000 mirrors MAX_TRACKED_URL_LEN in src/lib/tracking.ts, which refuses
+    // to turn an over-long URL into a tracked link in the first place — so
+    // this maxlength should never actually be hit via that path. It stays as
+    // a backstop for any other write site.
+    url: { type: String, required: true, maxlength: 2000 },
+    trackingId: { type: String, required: true }, // generated randomUUID() — no maxlength
   },
   { _id: false }
 );
@@ -75,31 +79,47 @@ const EmailLogSchema = new Schema<IEmailLog>({
     required: function (this: IEmailLog) {
       return this.channel === "email";
     },
+    maxlength: 500,
   },
-  body: { type: String, required: true },
+  // AI-drafted bodies are naturally bounded (draft.ts calls Claude with
+  // max_tokens: 1024, well under this limit); manual compose/regenerate is
+  // self-authored, not third-party. 50000 is a generous backstop either way.
+  body: { type: String, required: true, maxlength: 50000 },
   gmailThreadId: { type: String, default: null },
   gmailMessageId: { type: String, default: null },
   rfcMessageId: { type: String, default: null },
   sentAt: { type: Date, default: null },
-  trackingPixelId: { type: String, default: null },
-  openCount: { type: Number, default: 0 },
+  trackingPixelId: { type: String, default: null }, // generated randomUUID() — no maxlength
+  // `min: 0` documents intent only — it does NOT constrain `$inc` (see the
+  // matching note on Contact.engagementScore). The real control is the
+  // ceiling on the raw $inc in the track/open route (Security hardening,
+  // Wave C, Task 1).
+  openCount: { type: Number, default: 0, min: 0 },
   firstOpenedAt: { type: Date, default: null },
   links: { type: [LinkSchema], default: [] },
-  clickCount: { type: Number, default: 0 },
+  clickCount: { type: Number, default: 0, min: 0 }, // same $inc caveat — ceiling enforced in track/click
   firstClickedAt: { type: Date, default: null },
   replied: { type: Boolean, default: false },
   repliedAt: { type: Date, default: null },
-  replyBody: { type: String, default: null },
-  replySnippet: { type: String, default: null },
+  // Written from arbitrary inbound reply text (src/lib/replies.ts) — truncated
+  // at the write site via truncateReplyBody() BEFORE reaching this schema, so
+  // this maxlength should never actually reject a real write. See replies.ts.
+  replyBody: { type: String, default: null, maxlength: 100000 },
+  // Bounded independently by makeSnippet() (replies.ts) to <=81 chars, well
+  // under this cap — listed for completeness per the schema-bounds sweep.
+  replySnippet: { type: String, default: null, maxlength: 500 },
   sendAttemptedAt: { type: Date, default: null },
-  sendErrorCount: { type: Number, default: 0 },
-  lastSendError: { type: String, default: null },
+  sendErrorCount: { type: Number, default: 0, min: 0 },
+  // Driver/Gmail-API error strings — truncated at the write site via
+  // truncateForStorage() in src/lib/sequence.ts BEFORE reaching this schema.
+  lastSendError: { type: String, default: null, maxlength: 2000 },
   sentManuallyAt: { type: Date, default: null },
 }, {
   // createdAt only — matches Contact/Campaign convention. Existing docs simply
   // lack the field (fine). No updatedAt: EmailLog mutates constantly (tracking
   // counters) and an updatedAt would carry no useful meaning here.
   timestamps: { createdAt: true, updatedAt: false },
+  strict: true,
 });
 
 // Contact/Campaign list queries

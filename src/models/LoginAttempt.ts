@@ -5,18 +5,21 @@ export interface ILoginAttempt extends Document {
   createdAt: Date;
 }
 
-const LoginAttemptSchema = new Schema<ILoginAttempt>({
-  ip: {
-    type: String,
-    required: true,
-    maxlength: 64,
+const LoginAttemptSchema = new Schema<ILoginAttempt>(
+  {
+    ip: {
+      type: String,
+      required: true,
+      maxlength: 64,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+      required: true,
+    },
   },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    required: true,
-  },
-});
+  { strict: true }
+);
 
 // TTL index — failed-attempt records auto-expire 15 minutes after creation,
 // so the collection never grows unbounded and old failures stop counting

@@ -11,6 +11,7 @@ import {
 import { createContactChecked, normalizeEmail } from "@/lib/contacts";
 import { handleError } from "@/lib/api";
 import { asObjectIdString } from "@/lib/validate";
+import { envInt } from "@/lib/env";
 import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,29 @@ type DefaultChannel = "facebook" | "instagram" | "phone";
 
 const VALID_FORMATS: readonly ImportFormat[] = ["standard", "scraper"];
 const VALID_DEFAULT_CHANNELS: readonly DefaultChannel[] = ["facebook", "instagram", "phone"];
+
+// security-phase-2 (Wave C): each row costs 2-3 sequential awaited DB
+// queries inside createContactChecked, with no batching — an oversized CSV
+// (either in raw bytes or in row count after parsing) is an easy
+// self-inflicted outage with no upstream limit today. Both caps are
+// env-tunable; defaults are generous for a legitimate single-user CSV
+// export (Maps Lead Scraper batches are in the low thousands of rows).
+const MAX_IMPORT_BYTES = envInt("MAX_IMPORT_BYTES", 2_000_000);
+const MAX_IMPORT_ROWS = envInt("MAX_IMPORT_ROWS", 5000);
+
+function importTooLarge(bytes: number): NextResponse {
+  return NextResponse.json(
+    { error: `CSV exceeds the maximum import size of ${MAX_IMPORT_BYTES} bytes (got ${bytes})` },
+    { status: 413 }
+  );
+}
+
+function importTooManyRows(count: number): NextResponse {
+  return NextResponse.json(
+    { error: `CSV exceeds the maximum of ${MAX_IMPORT_ROWS} rows (got ${count})` },
+    { status: 413 }
+  );
+}
 
 interface SuppressedEntry {
   row: number;
@@ -93,6 +117,9 @@ export async function POST(request: NextRequest) {
       if (typeof body.csvText !== "string" || body.csvText.length === 0) {
         return NextResponse.json({ error: "csvText is required" }, { status: 400 });
       }
+      if (body.csvText.length > MAX_IMPORT_BYTES) {
+        return importTooLarge(body.csvText.length);
+      }
       const validCampaignId = asObjectIdString(body.campaignId);
       if (validCampaignId === null) {
         return NextResponse.json({ error: "campaignId is required" }, { status: 400 });
@@ -127,6 +154,11 @@ export async function POST(request: NextRequest) {
 
       if (!fileField || typeof fileField === "string") {
         return NextResponse.json({ error: "file is required" }, { status: 400 });
+      }
+      // Check size BEFORE reading the body into memory via .text() below —
+      // the whole point of the cap is to avoid buffering an oversized file.
+      if ((fileField as File).size > MAX_IMPORT_BYTES) {
+        return importTooLarge((fileField as File).size);
       }
       if (!campaignIdField || typeof campaignIdField !== "string") {
         return NextResponse.json({ error: "campaignId is required" }, { status: 400 });
@@ -184,6 +216,10 @@ export async function POST(request: NextRequest) {
 async function handleStandardImport(csvText: string, campaignId: string) {
   // Parse the CSV into valid rows and parse-level errors
   const { rows, errors: parseErrors } = parseContactsCsv(csvText);
+
+  if (rows.length > MAX_IMPORT_ROWS) {
+    return importTooManyRows(rows.length);
+  }
 
   let insertedCount = 0;
   const suppressed: SuppressedEntry[] = [];
@@ -254,6 +290,10 @@ async function handleScraperImport(
   defaultChannel: DefaultChannel | undefined
 ) {
   const { rows, errors: parseErrors } = parseScraperCsv(csvText);
+
+  if (rows.length > MAX_IMPORT_ROWS) {
+    return importTooManyRows(rows.length);
+  }
 
   let insertedCount = 0;
   const suppressed: SuppressedEntry[] = [];

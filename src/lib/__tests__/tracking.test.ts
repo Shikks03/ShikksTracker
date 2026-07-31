@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { extractAndRewriteLinks, renderTrackedHtml, htmlEscape } from "@/lib/tracking";
+import {
+  extractAndRewriteLinks,
+  renderTrackedHtml,
+  htmlEscape,
+  safeRedirectUrl,
+} from "@/lib/tracking";
 
 // ---------------------------------------------------------------------------
 // htmlEscape
@@ -427,5 +432,49 @@ describe("renderTrackedHtml", () => {
     const html = renderTrackedHtml("Hello\n\n", [], null);
     expect(html).not.toContain("<p></p>");
     expect(html).toBe("<p>Hello</p>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safeRedirectUrl (Security hardening, Wave C — Task 2: open-redirect guard
+// for /api/track/click, since EmailLog.links[].url has no protocol validator)
+// ---------------------------------------------------------------------------
+
+describe("safeRedirectUrl", () => {
+  const fallback = "https://app.example.com";
+
+  it("accepts a bare http:// URL", () => {
+    expect(safeRedirectUrl("http://x.com", fallback)).toBe("http://x.com");
+  });
+
+  it("accepts an https:// URL with path and query string", () => {
+    expect(safeRedirectUrl("https://x.com/a?b=c", fallback)).toBe(
+      "https://x.com/a?b=c"
+    );
+  });
+
+  it("rejects javascript: URLs", () => {
+    expect(safeRedirectUrl("javascript:alert(1)", fallback)).toBe(fallback);
+  });
+
+  it("rejects data: URLs", () => {
+    expect(safeRedirectUrl("data:text/html,x", fallback)).toBe(fallback);
+  });
+
+  it("rejects file: URLs", () => {
+    expect(safeRedirectUrl("file:///etc/passwd", fallback)).toBe(fallback);
+  });
+
+  it("rejects an empty string", () => {
+    expect(safeRedirectUrl("", fallback)).toBe(fallback);
+  });
+
+  it("rejects undefined", () => {
+    expect(safeRedirectUrl(undefined, fallback)).toBe(fallback);
+  });
+
+  it("rejects a malformed URL without throwing", () => {
+    expect(() => safeRedirectUrl("ht!tp://", fallback)).not.toThrow();
+    expect(safeRedirectUrl("ht!tp://", fallback)).toBe(fallback);
   });
 });

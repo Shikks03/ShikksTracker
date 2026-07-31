@@ -8,6 +8,7 @@ import {
   isNonEmailChannel,
   resolveOutreachLogStatusFilter,
 } from "@/lib/outreachLogs";
+import { parseLimit, parseOffset } from "@/lib/env";
 import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -80,8 +81,15 @@ export async function GET(request: NextRequest) {
     // sorts a missing field as the lowest possible value under a -1 sort —
     // so they naturally fall after every doc that does have createdAt, then
     // break ties among themselves via _id descending (documented fallback).
+    // Bounded (security-phase-2, Wave C): default cap high (1000) so the
+    // existing board — which expects "everything" — doesn't silently lose
+    // rows today; it only guards against unbounded growth.
+    const limit = parseLimit(searchParams, 1000, 5000);
+    const offset = parseOffset(searchParams, 100_000);
     const logs = await EmailLog.find(filter)
       .sort({ createdAt: -1, _id: -1 })
+      .skip(offset)
+      .limit(limit)
       .lean();
 
     if (logs.length === 0) {

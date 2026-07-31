@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import Contact from "@/models/Contact";
 import { handleError } from "@/lib/api";
 import { createContactChecked, CreateContactInput } from "@/lib/contacts";
-import { envInt } from "@/lib/env";
+import { envInt, parseLimit, parseOffset } from "@/lib/env";
 import { asObjectIdString, asOptionalString, asString } from "@/lib/validate";
 import { requireSession } from "@/lib/auth";
 
@@ -62,10 +62,42 @@ export async function GET(request: NextRequest) {
         { $match: filter },
         { $sort: sort === "score" ? { engagementScore: -1 } : { createdAt: -1 } },
         {
+          // security-phase-2 (Wave C): sub-pipeline form instead of a plain
+          // localField/foreignField lookup. The plain form materialises the
+          // FULL log document — every `subject`, `body`, `replyBody` — for
+          // every contact before the $unset near the bottom discards it; as
+          // the log collection grows this risks the 16 MB per-document BSON
+          // limit or the 100 MB blocking-stage memory limit. Only the fields
+          // the stages below actually read are projected:
+          //   status, sentAt   -> lastSentAt (filters status:"sent", maps sentAt)
+          //   openCount        -> opened
+          //   clickCount       -> clicked
+          //   replied          -> replied / repliedAt / replySnippet filters
+          //   repliedAt        -> repliedAt / replySnippet sort key
+          //   replySnippet     -> replySnippet value
+          //   stage            -> lastLog sort key (then lastLogStage)
+          //   status (again)   -> lastLogStatus (via lastLog)
+          // Every field referenced by any $addFields stage below is kept;
+          // nothing else from EmailLog is needed here.
           $lookup: {
             from: "emaillogs",
-            localField: "_id",
-            foreignField: "contactId",
+            let: { contactId: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$contactId", "$$contactId"] } } },
+              {
+                $project: {
+                  _id: 0,
+                  status: 1,
+                  sentAt: 1,
+                  openCount: 1,
+                  clickCount: 1,
+                  replied: 1,
+                  repliedAt: 1,
+                  replySnippet: 1,
+                  stage: 1,
+                },
+              },
+            ],
             as: "logs",
           },
         },
@@ -192,11 +224,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Plain path (no stats)
+    // Bounded (security-phase-2, Wave C): with no query params this previously
+    // returned the entire contacts collection. Default cap is deliberately
+    // high (1000) so no existing caller — which today expects "everything" —
+    // silently loses rows; it only guards against unbounded growth.
+    const limit = parseLimit(searchParams, 1000, 5000);
+    const offset = parseOffset(searchParams, 100_000);
     let query = Contact.find(filter);
     if (sort === "score") {
       query = query.sort({ engagementScore: -1 });
     }
-    const contacts = await query.lean();
+    const contacts = await query.skip(offset).limit(limit).lean();
     return NextResponse.json(contacts);
   } catch (err) {
     return handleError(err);

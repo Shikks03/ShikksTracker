@@ -10,12 +10,12 @@ export interface ICampaign extends Document {
 
 const CampaignSchema = new Schema<ICampaign>(
   {
-    name: { type: String, required: true },
-    offerSummary: { type: String, required: true },
-    toneNotes: { type: String, default: "" },
+    name: { type: String, required: true, maxlength: 200 },
+    offerSummary: { type: String, required: true, maxlength: 5000 },
+    toneNotes: { type: String, default: "", maxlength: 2000 },
     sequenceSpacingDays: { type: [Number], default: [0, 5, 9] },
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: { createdAt: true, updatedAt: false }, strict: true }
 );
 
 const Campaign =

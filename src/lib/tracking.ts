@@ -43,6 +43,18 @@ function stripTrailingPunct(url: string): string {
   return url.replace(/[.,;:!?)]+$/, "");
 }
 
+/**
+ * Matches EmailLog's `LinkSchema.url` maxlength (src/models/EmailLog.ts).
+ * URL_RE has no upper bound on match length (it runs until whitespace), so a
+ * pathological body — e.g. a single spaceless run of characters starting
+ * with "https://" inside AI-drafted or scraper-CSV-derived text — could
+ * otherwise produce a `links` entry too long for the schema and throw a
+ * ValidationError mid-send. Anything longer is simply not turned into a
+ * tracked link; it still renders in the body as plain text (see
+ * renderTrackedHtml's untracked-URL fallback).
+ */
+const MAX_TRACKED_URL_LEN = 2000;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -99,7 +111,12 @@ export function extractAndRewriteLinks(body: string): { links: TrackingLink[] } 
   while ((match = URL_RE.exec(body)) !== null) {
     const raw = match[1];
     const url = stripTrailingPunct(raw);
-    if (url && !urlMap.has(url) && !isUnsubscribeUrl(url)) {
+    if (
+      url &&
+      url.length <= MAX_TRACKED_URL_LEN &&
+      !urlMap.has(url) &&
+      !isUnsubscribeUrl(url)
+    ) {
       urlMap.set(url, randomUUID());
     }
   }
@@ -110,6 +127,40 @@ export function extractAndRewriteLinks(body: string): { links: TrackingLink[] } 
   }
 
   return { links };
+}
+
+// ---------------------------------------------------------------------------
+// safeRedirectUrl
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a URL before it is used as a redirect target for
+ * /api/track/click. `url` here comes straight out of `EmailLog.links[].url`
+ * in the DB — and while `URL_RE` above restricts what gets WRITTEN there to
+ * http(s), that only guards the AI-drafted-email write path. `keyPoints` is
+ * built from imported scraper CSV (including a `website` column) and is fed
+ * verbatim into the Claude prompt in sequence.ts, so a prompt-injected CSV
+ * row could in principle plant a non-http(s) URL (`javascript:`, `data:`,
+ * `file:`, etc.) that this endpoint would otherwise 302-redirect to,
+ * silently turning our own domain into an open redirector.
+ *
+ * Returns `url` unchanged only when it parses as an absolute URL whose
+ * protocol is exactly "http:" or "https:"; otherwise returns `fallback`.
+ * `new URL()` throwing on a malformed string is caught, not propagated.
+ *
+ * Pure function — no DB, no Next.js types — safe to unit test directly.
+ */
+export function safeRedirectUrl(url: string | undefined, fallback: string): string {
+  if (!url) return fallback;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return url;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // ---------------------------------------------------------------------------

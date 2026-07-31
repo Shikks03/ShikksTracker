@@ -10,11 +10,13 @@ export interface ITemplate extends Document {
 
 const TemplateSchema = new Schema<ITemplate>(
   {
-    name:    { type: String, required: true, trim: true },
-    subject: { type: String, required: true, trim: true },
-    body:    { type: String, required: true, trim: true },
+    name:    { type: String, required: true, trim: true, maxlength: 200 },
+    subject: { type: String, required: true, trim: true, maxlength: 500 },
+    // AI-generate-a-template (src/lib/draft.ts) is max_tokens-bounded like the
+    // other Claude call sites; manual entry is self-authored. Generous backstop.
+    body:    { type: String, required: true, trim: true, maxlength: 50000 },
   },
-  { timestamps: { createdAt: true, updatedAt: true } }
+  { timestamps: { createdAt: true, updatedAt: true }, strict: true }
 );
 
 // Index by name for faster lookups; not unique (allow same name across revisions)

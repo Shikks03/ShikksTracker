@@ -52,7 +52,13 @@ export interface IContact extends Document {
 
 const ContactSchema = new Schema<IContact>(
   {
-    businessName: { type: String, required: true },
+    // maxlength bounds below (Security hardening, Wave C) are generous, not
+    // tight — the goal is to cap the previously-unbounded-up-to-16MB string
+    // fields, not to constrain legitimate values. See src/lib/contacts.ts /
+    // scraperCsv.ts / csv.ts for the write-site audit — some of those import
+    // paths do not themselves bound length before insert, so these caps are
+    // the backstop of last resort, not the only control.
+    businessName: { type: String, required: true, maxlength: 200 },
     contactEmail: {
       type: String,
       required: function (this: IContact) {
@@ -60,9 +66,10 @@ const ContactSchema = new Schema<IContact>(
       },
       lowercase: true,
       trim: true,
+      maxlength: 320, // RFC 5321 practical upper bound
     },
-    contactName: { type: String },
-    keyPoints: { type: String, required: true },
+    contactName: { type: String, maxlength: 200 },
+    keyPoints: { type: String, required: true, maxlength: 4000 },
     importMethod: { type: String, enum: ["csv", "manual"], required: true },
     leadSource: {
       type: String,
@@ -75,13 +82,13 @@ const ContactSchema = new Schema<IContact>(
       enum: ["email", "facebook", "instagram", "phone"],
       default: "email",
     },
-    phone: { type: String, trim: true },
-    facebook: { type: String, trim: true },
-    instagram: { type: String, trim: true },
-    website: { type: String, trim: true },
-    sourcePlaceId: { type: String },
-    webPresenceTier: { type: String },
-    claimed: { type: String },
+    phone: { type: String, trim: true, maxlength: 50 },
+    facebook: { type: String, trim: true, maxlength: 500 },
+    instagram: { type: String, trim: true, maxlength: 500 },
+    website: { type: String, trim: true, maxlength: 500 },
+    sourcePlaceId: { type: String, maxlength: 200 },
+    webPresenceTier: { type: String, maxlength: 50 },
+    claimed: { type: String, maxlength: 20 },
     recentReviewDays: { type: Number },
     status: {
       type: String,
@@ -106,19 +113,27 @@ const ContactSchema = new Schema<IContact>(
       ],
       default: "not_started",
     },
-    engagementScore: { type: Number, default: 0 },
+    // `min: 0` documents intent only — it does NOT constrain `$inc` (Mongoose
+    // validators do not run on atomic $inc updates unless runValidators is
+    // passed, and this codebase's $inc call sites don't). The real control
+    // against unbounded growth is the ceiling on the raw counters in the
+    // track/open and track/click routes (Security hardening, Wave C, Task 1).
+    engagementScore: { type: Number, default: 0, min: 0 },
     nextSendAt: { type: Date, default: null },
     nextActionAt: { type: Date, default: null },
-    nextActionNote: { type: String, default: null },
+    nextActionNote: { type: String, default: null, maxlength: 500 },
     unsubscribeToken: {
       type: String,
       default: () => randomUUID(),
       // Sparse unique index: the token is always set on new contacts but may be
       // absent on very old docs created before this field was added (pre-migration).
       // The route handles the missing-token case gracefully (neutral response).
+      // No maxlength: this holds a generated randomUUID() value, not
+      // third-party input — bounding it risks rejecting a legitimate value
+      // for no security benefit.
     },
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: { createdAt: true, updatedAt: false }, strict: true }
 );
 
 // Index change (multi-channel): partial unique so email-less contacts don't collide;

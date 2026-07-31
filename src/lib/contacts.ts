@@ -65,6 +65,45 @@ export type CreateContactResult =
  * Caller must ensure connectDB() has been called (or we call it here for
  * consistency so that callers don't need to worry).
  */
+/**
+ * Per-field length caps, mirroring the `maxlength` values on the Contact
+ * schema (security-phase-2, Wave C).
+ *
+ * These MUST stay in sync with src/models/Contact.ts. We truncate here rather
+ * than reject because the main caller is the CSV import loop: a single
+ * pathological cell (a scraped "business name" that is really a paragraph, a
+ * website column containing a tracking-parameter-laden URL) would otherwise
+ * throw a Mongoose ValidationError and abort the ENTIRE import rather than
+ * skipping one row. Truncating keeps a 5000-row import from being killed by
+ * one bad cell, and the data these fields carry is descriptive, not
+ * identifying — losing the tail is harmless.
+ *
+ * Note businessName/sourcePlaceId on the non-email path are already bounded
+ * upstream by asString(..., 200); this table covers everything else.
+ */
+const FIELD_CAPS = {
+  businessName: 200,
+  contactName: 200,
+  keyPoints: 4000,
+  phone: 50,
+  handle: 500, // facebook / instagram / website
+  webPresenceTier: 50,
+  claimed: 20,
+} as const;
+
+/**
+ * Truncate a string to `max` code points, or pass through non-strings
+ * untouched (undefined stays undefined so the caller's spread guards still
+ * work). Code-point-safe via Array.from: scraped text really does contain
+ * emoji, and a UTF-16 slice can split a surrogate pair — the same reasoning
+ * documented in scraperCsv.ts.
+ */
+function cap(value: string | undefined, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const chars = Array.from(value);
+  return chars.length <= max ? value : chars.slice(0, max).join("");
+}
+
 export async function createContactChecked(
   input: CreateContactInput,
   importMethod: "csv" | "manual"
@@ -120,10 +159,10 @@ export async function createContactChecked(
     // unsubscribeToken is also set by the Mongoose schema default, but explicit here
     // so the value is visible in the creation path and in tests.
     const contact = await Contact.create({
-      businessName: input.businessName,
+      businessName: cap(input.businessName, FIELD_CAPS.businessName),
       contactEmail: normalizedEmail,
-      contactName: input.contactName,
-      keyPoints: input.keyPoints,
+      contactName: cap(input.contactName, FIELD_CAPS.contactName),
+      keyPoints: cap(input.keyPoints, FIELD_CAPS.keyPoints),
       leadSource: input.leadSource ?? "cold_email",
       campaignId: validCampaignId,
       importMethod,
@@ -213,19 +252,21 @@ export async function createContactChecked(
   const contact = await Contact.create({
     businessName: validBusinessName,
     ...(normalizedEmail ? { contactEmail: normalizedEmail } : {}),
-    contactName: input.contactName,
-    keyPoints: input.keyPoints,
+    contactName: cap(input.contactName, FIELD_CAPS.contactName),
+    keyPoints: cap(input.keyPoints, FIELD_CAPS.keyPoints),
     leadSource: input.leadSource ?? "cold_email",
     campaignId: validCampaignId,
     importMethod,
     outreachChannel: channel,
-    ...(input.phone ? { phone: input.phone } : {}),
-    ...(input.facebook ? { facebook: input.facebook } : {}),
-    ...(input.instagram ? { instagram: input.instagram } : {}),
-    ...(input.website ? { website: input.website } : {}),
+    ...(input.phone ? { phone: cap(input.phone, FIELD_CAPS.phone) } : {}),
+    ...(input.facebook ? { facebook: cap(input.facebook, FIELD_CAPS.handle) } : {}),
+    ...(input.instagram ? { instagram: cap(input.instagram, FIELD_CAPS.handle) } : {}),
+    ...(input.website ? { website: cap(input.website, FIELD_CAPS.handle) } : {}),
     ...(validSourcePlaceId ? { sourcePlaceId: validSourcePlaceId } : {}),
-    ...(input.webPresenceTier ? { webPresenceTier: input.webPresenceTier } : {}),
-    ...(input.claimed ? { claimed: input.claimed } : {}),
+    ...(input.webPresenceTier
+      ? { webPresenceTier: cap(input.webPresenceTier, FIELD_CAPS.webPresenceTier) }
+      : {}),
+    ...(input.claimed ? { claimed: cap(input.claimed, FIELD_CAPS.claimed) } : {}),
     // NOT the truthiness pattern used above: 0 is a valid, meaningful day
     // count (review posted today) and is falsy, so `input.x ? {...} : {}`
     // would silently drop it. Explicit undefined-check instead.

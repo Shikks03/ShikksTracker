@@ -56,6 +56,31 @@ const SEND_WINDOW_TIMEZONE = "Asia/Manila";
  */
 const RUN_TIME_BUDGET_MS = 240_000;
 
+/**
+ * Cap on how many overdue-nextActionAt contacts sendActionReminders() loads
+ * into memory / into the digest email HTML per run (Security hardening,
+ * Wave C — this query was previously unbounded). 200 rows is already a large
+ * digest email; a bigger backlog is surfaced via the "+N more" note instead
+ * of growing the query without limit. See sendActionReminders().
+ */
+const ACTION_REMINDER_LIMIT = 200;
+
+/**
+ * EmailLog.lastSendError has a maxlength (Security hardening, Wave C — see
+ * src/models/EmailLog.ts). Its value is often a driver/Gmail-API error
+ * message, which is NOT under our control and can occasionally be very long
+ * (stack-trace-shaped strings from some client library failures). Truncate
+ * BEFORE writing so a hardening change (adding maxlength) never turns into a
+ * ValidationError that crashes the middle of an engine run — the whole
+ * reason this class of bug matters is that ValidationError here would itself
+ * prevent the send-failure state transition from being recorded.
+ */
+const LAST_SEND_ERROR_MAX_LEN = 1900; // just under EmailLog.lastSendError's 2000 maxlength
+
+function truncateForStorage(text: string, maxLen: number): string {
+  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+}
+
 // ---------------------------------------------------------------------------
 // Stale-send sweep constants
 // ---------------------------------------------------------------------------
@@ -463,6 +488,18 @@ interface DraftsResult {
   errors: string[];
 }
 
+/**
+ * How many due-contact candidates to load before giving up on this run.
+ * The loop below breaks as soon as `created >= DRAFTS_PER_RUN`, but it also
+ * `continue`s past contacts that already have a log (idempotency) or that
+ * turn out to be suppressed — so a strict `limit(DRAFTS_PER_RUN)` could
+ * under-fill a run when many due contacts are skipped. A small multiple
+ * gives the loop room to skip without re-introducing an unbounded query
+ * (Security hardening, Wave C — this previously loaded every active due
+ * contact into memory on every cron run, unbounded).
+ */
+const DRAFTS_CANDIDATE_LIMIT = DRAFTS_PER_RUN * 5;
+
 async function generateDrafts(): Promise<DraftsResult> {
   const now = new Date();
   const result: DraftsResult = { created: 0, errors: [] };
@@ -473,6 +510,7 @@ async function generateDrafts(): Promise<DraftsResult> {
     currentStage: { $lt: 3 },
   })
     .sort({ nextSendAt: 1 })
+    .limit(DRAFTS_CANDIDATE_LIMIT)
     .lean();
 
   for (const contact of contacts) {
@@ -828,7 +866,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
         status: "approved",
         sendAttemptedAt: null,
         $inc: { sendErrorCount: 1 },
-        lastSendError: errMsg,
+        lastSendError: truncateForStorage(errMsg, LAST_SEND_ERROR_MAX_LEN),
       });
       return {
         status: "failed",
@@ -886,7 +924,7 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
         status: "approved",
         sendAttemptedAt: null,
         $inc: { sendErrorCount: 1 },
-        lastSendError: `unexpected error: ${msg}`,
+        lastSendError: truncateForStorage(`unexpected error: ${msg}`, LAST_SEND_ERROR_MAX_LEN),
       }).catch(() => {
         // Best-effort revert — if this also fails, the stale-send sweep will catch it
         console.error(`[sequence] CRITICAL: failed to revert log ${String(log._id)} from "sending" to "approved":`, msg);
@@ -1087,16 +1125,25 @@ async function sendActionReminders(cronRunId: string): Promise<ActionRemindersRe
   const result: ActionRemindersResult = { due: 0, digestSent: false, errors: [] };
   const now = new Date();
 
-  // Query contacts with a due next action
-  const dueContacts = await Contact.find({
-    nextActionAt: { $lte: now, $ne: null },
-  })
+  const actionQuery = { nextActionAt: { $lte: now, $ne: null } };
+
+  // True due count — kept unbounded (a single indexed count, not a document
+  // load) so `result.due`/`actionRemindersDue` in the CronRun summary stays
+  // accurate even when the list below is truncated.
+  const totalDue = await Contact.countDocuments(actionQuery);
+  result.due = totalDue;
+
+  if (totalDue === 0) return result;
+
+  // Query contacts with a due next action, bounded so an unbounded backlog
+  // cannot load an unbounded array into memory / into the digest HTML
+  // (Security hardening, Wave C). If the backlog exceeds the limit, the
+  // truncation is surfaced in the email itself rather than silently dropped
+  // — see the "+N more" row below.
+  const dueContacts = await Contact.find(actionQuery)
     .sort({ nextActionAt: 1 }) // oldest-due first
+    .limit(ACTION_REMINDER_LIMIT)
     .lean();
-
-  result.due = dueContacts.length;
-
-  if (dueContacts.length === 0) return result;
 
   // Throttle: one digest per Manila day — check prior runs for this day
   const dayStart = getManilaDayStart(now);
@@ -1146,9 +1193,17 @@ async function sendActionReminders(cronRunId: string): Promise<ActionRemindersRe
     ? `<p><a href="${htmlEscape(baseUrl)}">Open dashboard</a></p>`
     : "";
 
+  // Surface truncation explicitly rather than silently dropping items when
+  // the backlog exceeds ACTION_REMINDER_LIMIT.
+  const truncatedCount = totalDue - dueContacts.length;
+  const truncationNote =
+    truncatedCount > 0
+      ? `<p><strong>+${truncatedCount} more</strong> overdue action${truncatedCount !== 1 ? "s" : ""} not shown — open the dashboard to see the full list.</p>`
+      : "";
+
   const htmlBody = `
     <h2>Next-action reminders</h2>
-    <p>${dueContacts.length} contact${dueContacts.length !== 1 ? "s" : ""} need${dueContacts.length === 1 ? "s" : ""} your attention:</p>
+    <p>${totalDue} contact${totalDue !== 1 ? "s" : ""} need${totalDue === 1 ? "s" : ""} your attention${truncatedCount > 0 ? ` (showing the ${dueContacts.length} most overdue)` : ""}:</p>
     <table cellpadding="0" cellspacing="0" style="border-collapse:collapse">
       <thead>
         <tr>
@@ -1159,13 +1214,14 @@ async function sendActionReminders(cronRunId: string): Promise<ActionRemindersRe
       </thead>
       <tbody>${rows}</tbody>
     </table>
+    ${truncationNote}
     ${reviewLink}
   `.trim();
 
   try {
     await sendGmailMessage({
       to: selfAddress,
-      subject: `[ShikksTracker] ${dueContacts.length} follow-up action${dueContacts.length !== 1 ? "s" : ""} due`,
+      subject: `[ShikksTracker] ${totalDue} follow-up action${totalDue !== 1 ? "s" : ""} due`,
       htmlBody,
     });
 

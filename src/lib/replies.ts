@@ -116,6 +116,36 @@ export function makeSnippet(text: string): string | null {
 }
 
 /**
+ * EmailLog.replyBody has a maxlength (Security hardening, Wave C — see
+ * src/models/EmailLog.ts). replyBody is written from WHATEVER A THIRD PARTY
+ * EMAILS US — there is no upper bound on an inbound reply's length. Without
+ * truncating at the write site, an unusually long reply would throw a
+ * Mongoose ValidationError in the middle of checkReplies()'s per-contact
+ * loop, breaking reply detection for every contact processed after it in the
+ * same run (the catch block below logs and continues per-contact, but a
+ * thrown ValidationError here is exactly the outage a hardening change must
+ * not introduce). Truncate BEFORE the write, not after.
+ *
+ * Exported for unit tests — treat as internal.
+ */
+export const REPLY_BODY_MAX_LEN = 99_000; // just under EmailLog.replyBody's 100000 maxlength
+
+/**
+ * `.slice(0, n)` on a JS string counts UTF-16 code units, and inbound email
+ * text may contain emoji/astral characters — a naive slice can land inside a
+ * surrogate pair and produce an invalid half-character at the cut point
+ * (same code-point-safety concern already documented for scraper review
+ * text in src/lib/scraperCsv.ts's truncateOnWordBoundary). Array.from splits
+ * on code points, not code units, so this stays safe regardless of content.
+ */
+export function truncateReplyBody(text: string): string {
+  if (text.length <= REPLY_BODY_MAX_LEN) return text;
+  const chars = Array.from(text);
+  if (chars.length <= REPLY_BODY_MAX_LEN) return text;
+  return chars.slice(0, REPLY_BODY_MAX_LEN).join("") + "…";
+}
+
+/**
  * Opt-out matching design rationale (asymmetry principle):
  *
  * A false-positive opt-out is SILENT AND PERMANENT — the contact is unsubscribed,
@@ -503,7 +533,7 @@ export async function checkReplies(): Promise<RepliesResult> {
         await EmailLog.findByIdAndUpdate(lastSentLog._id, {
           replied: true,
           repliedAt,
-          replyBody: optOutClean || null,
+          replyBody: optOutClean ? truncateReplyBody(optOutClean) : null,
           replySnippet: makeSnippet(optOutClean),
         });
 
@@ -552,7 +582,7 @@ export async function checkReplies(): Promise<RepliesResult> {
         await EmailLog.findByIdAndUpdate(lastSentLog._id, {
           replied: true,
           repliedAt,
-          replyBody: replyClean || null,
+          replyBody: replyClean ? truncateReplyBody(replyClean) : null,
           replySnippet: makeSnippet(replyClean),
         });
 

@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import Campaign from "@/models/Campaign";
 import { handleError } from "@/lib/api";
 import { validateSequenceSpacingDays } from "@/lib/validate";
+import { parseLimit, parseOffset } from "@/lib/env";
 import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,12 @@ export async function GET(request: NextRequest) {
   if (authError) return authError;
   try {
     await connectDB();
-    const campaigns = await Campaign.find().lean();
+    const { searchParams } = request.nextUrl;
+    // Bounded (security-phase-2, Wave C): default cap high (1000) so nothing
+    // existing breaks; only guards against unbounded growth.
+    const limit = parseLimit(searchParams, 1000, 5000);
+    const offset = parseOffset(searchParams, 100_000);
+    const campaigns = await Campaign.find().skip(offset).limit(limit).lean();
     return NextResponse.json(campaigns);
   } catch (err) {
     return handleError(err);

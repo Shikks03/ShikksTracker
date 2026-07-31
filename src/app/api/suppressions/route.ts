@@ -7,6 +7,7 @@ import { isValidEmail, normalizeEmail } from "@/lib/contacts";
 // Was a private copy here until 2026-07-30; two identical escapers is exactly
 // the drift this codebase already had to clean up once (Task 5.1).
 import { escapeRegex } from "@/lib/email";
+import { parseLimit, parseOffset } from "@/lib/env";
 import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +23,22 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const q = searchParams.get("q");
 
-    const filter = q ? { email: { $regex: escapeRegex(q), $options: "i" } } : {};
-    const suppressions = await Suppression.find(filter).lean();
+    // Index-bypass fix, NOT an injection fix (escapeRegex below already
+    // neutralizes regex metacharacters — there is no ReDoS or operator
+    // injection here). The problem: an unanchored case-insensitive $regex
+    // can't use the unique `email` index, so every search was a full
+    // collection scan with no bound on the length of `q`. Clamping to 128
+    // chars and anchoring with `^` turns this into an (index-servable)
+    // prefix search. Do not "simplify" this back to a bare escapeRegex(q).
+    const clampedQ = q ? q.slice(0, 128) : null;
+    const filter = clampedQ
+      ? { email: { $regex: `^${escapeRegex(clampedQ)}`, $options: "i" } }
+      : {};
+    // Bounded (security-phase-2, Wave C): default cap high (1000) so nothing
+    // existing breaks; only guards against unbounded growth.
+    const limit = parseLimit(searchParams, 1000, 5000);
+    const offset = parseOffset(searchParams, 100_000);
+    const suppressions = await Suppression.find(filter).skip(offset).limit(limit).lean();
     return NextResponse.json(suppressions);
   } catch (err) {
     return handleError(err);

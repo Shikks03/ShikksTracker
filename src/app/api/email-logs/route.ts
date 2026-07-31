@@ -6,6 +6,7 @@ import { handleError } from "@/lib/api";
 import { isSubjectRequiredForChannel } from "@/lib/outreachLogs";
 import { EMAIL_CHANNEL_QUERY } from "@/lib/sequence";
 import { asObjectIdString } from "@/lib/validate";
+import { parseLimit, parseOffset } from "@/lib/env";
 import { requireSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -125,7 +126,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ count });
     }
 
-    const logs = await EmailLog.find(filter).lean();
+    // Bounded (security-phase-2, Wave C): with no query params this
+    // previously returned every log in the collection — INCLUDING every
+    // `subject`, `body`, and `replyBody`, the most expensive rows in the
+    // whole schema. Default cap is high (1000) so nothing existing breaks.
+    const limit = parseLimit(searchParams, 1000, 5000);
+    const offset = parseOffset(searchParams, 100_000);
+    const logs = await EmailLog.find(filter).skip(offset).limit(limit).lean();
     return NextResponse.json(logs);
   } catch (err) {
     return handleError(err);
