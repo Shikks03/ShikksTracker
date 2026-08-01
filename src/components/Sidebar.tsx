@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { index: "06", label: "Suppressions", href: "/suppressions",showBadge: false },
   { index: "07", label: "Compose",      href: "/compose",     showBadge: false },
   { index: "08", label: "Templates",    href: "/templates",   showBadge: false },
+  { index: "09", label: "Settings",     href: "/settings",    showBadge: false },
 ];
 
 /* ── Typography helpers (inline so no "use client" needed in ui.tsx) ── */
