@@ -168,13 +168,22 @@ showBadge: false }` to `NAV_ITEMS`.
 
 ## 8. Testing
 
-- `src/lib/__tests__/settings.test.ts` (new): `getSettings()` creates a default doc on
-  first call and returns the same doc on subsequent calls; `updateSettings()` only
-  touches the two whitelisted fields and upserts if no doc exists yet.
-- `src/lib/__tests__/sequence.test.ts` (existing): add cases confirming
-  `generateDrafts()`/`sendApproved()` are not invoked (or their results are zeroed) when
-  the corresponding setting is `false`, and that `RunSummary.draftGenerationEnabled`/
-  `sendingEnabled` reflect the setting used for that run.
+- `src/lib/__tests__/settings.test.ts` (new): `getSettings()`/`updateSettings()` call
+  `Settings.findOneAndUpdate` with the right filter/`$set`/options (upsert, defaults on
+  insert) — mocked the same way `sequence.test.ts` already mocks `Contact`/`EmailLog`/
+  `Campaign` (this codebase has no live-DB test infrastructure anywhere).
+- **No new `sequence.test.ts` cases for the gating logic itself.** `generateDrafts`,
+  `sendApproved`, and `runSequenceEngine` are not unit-tested anywhere in this codebase
+  today — the first two aren't exported, and `runSequenceEngine` calls them as same-file
+  internal functions, so mocking the `sequence` module from outside can't intercept those
+  calls (module mocks only rewire what other files import, not same-file references).
+  Testing this properly would require an invasive refactor (dependency injection for
+  `generateDrafts`/`sendApproved`) that's out of scope for a two-boolean feature.
+  Verification instead: `npx tsc --noEmit` (catches shape mismatches in the three
+  `RunSummary` construction sites), the existing suite staying green (nothing today
+  asserts on a literal `RunSummary` shape — `CronRun.summary` is `Schema.Types.Mixed`),
+  and a manual cron-endpoint smoke test proving the shipped-default "off" state produces
+  `draftsCreated: 0, sent: 0` with both flags reported `false`.
 - Existing 566 tests must stay green; `npx tsc --noEmit` and `npm run build` must pass.
 
 ---
