@@ -91,14 +91,14 @@ the first call from either the API route or the engine creates the row.
 
 ## 5. Engine integration — `src/lib/sequence.ts`
 
-In `runSequenceEngine()`, immediately after `connectDB()`:
+In `runSequenceEngine()`, Stage 0 (`sweepStaleSendingLogs`) and Stage A (`checkReplies`)
+are called exactly as today, unconditionally. Immediately after `checkReplies()` (neither
+stage needs the setting, so ordering before/after them is not load-bearing — this is
+simply where the implementation put it):
 
 ```ts
 const settings = await getSettings();
 ```
-
-Stage 0 (`sweepStaleSendingLogs`) and Stage A (`checkReplies`) are called exactly as
-today, unconditionally.
 
 Stage B becomes conditional:
 ```ts
