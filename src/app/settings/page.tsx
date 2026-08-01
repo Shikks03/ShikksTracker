@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Panel, Button } from "@/components/ui";
-import { serif, grotesk, mono, INK, FAINT } from "@/components/tokens";
+import { serif, grotesk, mono, INK, FAINT, CLAY } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
 
 interface Settings {
@@ -90,6 +90,8 @@ export default function SettingsPage() {
     setSettings(data);
   }
 
+  const anyPending = pendingField !== null;
+
   return (
     <div className="page-enter" style={{ padding: "34px 42px 56px" }}>
       <span
@@ -128,7 +130,7 @@ export default function SettingsPage() {
           style={{
             fontFamily: grotesk,
             fontSize: 14,
-            color: "#A23B28",
+            color: CLAY,
             marginBottom: 16,
           }}
         >
@@ -142,14 +144,14 @@ export default function SettingsPage() {
             label="Draft generation"
             caption="Cron will draft new outreach emails for contacts whose next send is due."
             enabled={settings.draftGenerationEnabled}
-            pending={pendingField === "draftGenerationEnabled"}
+            pending={anyPending}
             onToggle={() => handleToggle("draftGenerationEnabled")}
           />
           <ToggleRow
             label="Sending"
             caption="Cron will send previously-approved drafts during the 8am–6pm Manila window. Manual sends (Review Queue, Compose) are not affected by this switch."
             enabled={settings.sendingEnabled}
-            pending={pendingField === "sendingEnabled"}
+            pending={anyPending}
             last
             onToggle={() => handleToggle("sendingEnabled")}
           />
