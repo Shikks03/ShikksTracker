@@ -57,6 +57,25 @@ function getClient(): Anthropic {
 const MODEL =
   (process.env.ANTHROPIC_MODEL as string | undefined) ?? "claude-sonnet-4-6";
 
+/**
+ * Shared anti-AI-tell guardrails, distilled from the layered-humanizer skill's
+ * lexical-patterns catalog down to the patterns that actually show up in short
+ * outreach copy (the catalog also covers things irrelevant here, like headings
+ * and "Challenges and Future Prospects" sections). Appended to every drafting
+ * prompt below so generated copy doesn't read as visibly AI-written before a
+ * human ever has to run it back through the humanizer skill by hand.
+ */
+const AI_TELL_GUARDRAILS = `Avoid these AI-writing tells:
+- No em dashes or en dashes (— or –) anywhere. Use a period, comma, or colon instead.
+- No AI-vocabulary words: delve, crucial, enhance, foster/fostering, tapestry, testament, underscore (verb), showcase, vibrant, boasts, nestled, "in the heart of", stunning, breathtaking, seamless, robust, leverage, elevate, unlock, game-changer, unparalleled.
+- Don't dodge "is/has" with "serves as", "stands as", or "boasts a".
+- No rule-of-three filler lists (three abstract nouns strung together just to sound thorough).
+- No filler phrases ("in order to", "due to the fact that", "at this point in time") — say it plainly.
+- No hedging stacks ("could potentially possibly").
+- No assistant-speak: "I hope this helps", "let me know if", "Would you like me to", "Of course!", "Great question!".
+- No generic uplifting closers ("exciting times ahead", "here's to a bright future").
+- Vary sentence length instead of giving every sentence the same clipped, mid-length cadence.`;
+
 /** System prompt instructing Claude how to write outreach emails. */
 export const SYSTEM_PROMPT = `You are a cold outreach specialist writing short, human-feeling outreach emails for Philippine small businesses.
 
@@ -72,6 +91,8 @@ RULES — follow every one, no exceptions:
    - Stage 2–3 (follow-ups): shorter than the initial email. Reference the previous email(s) briefly. Add one new angle or gentle nudge. NEVER guilt-trip.
    - Stage 2–3 subjects: must read as a natural thread continuation (e.g. "Re: Quick question for [Business]" or similar).
 8. Warm and direct tone. English is fine; keep it natural for a Philippine business audience.
+
+${AI_TELL_GUARDRAILS}
 
 Use the email_draft tool to return your result.`;
 
@@ -98,6 +119,8 @@ RULES — follow every one, no exceptions:
    - Stage 1 (initial): a friendly first touch referencing something specific about the business, then the one low-friction ask.
    - Stage 2–3 (follow-ups): even shorter than the initial message. A brief, casual nudge — reference the earlier message lightly. Never guilt-trip, never repeat the whole pitch.
 
+${AI_TELL_GUARDRAILS}
+
 Use the message_draft tool to return your result — body only, no subject.`;
 
 /**
@@ -122,6 +145,8 @@ RULES — follow every one, no exceptions:
 7. Stage awareness:
    - Stage 1 (initial): a first call — introduce, give the specific reason, ask permission to continue.
    - Stage 2–3 (follow-ups): a shorter callback opener — briefly reference the earlier attempt/message, then the permission question.
+
+${AI_TELL_GUARDRAILS}
 
 Use the message_draft tool to return your result — body only, no subject.`;
 
@@ -405,6 +430,8 @@ RULES — follow every one, no exceptions:
 5. Respect the tone notes. If they say formal, be formal; if casual, be casual.
 6. No spammy phrasing: no ALL CAPS words, no "limited time offer", at most one "!" in the whole email.
 7. Warm and direct tone, natural for a Philippine small-business audience.
+
+${AI_TELL_GUARDRAILS}
 
 Use the email_draft tool to return your result.`;
 
