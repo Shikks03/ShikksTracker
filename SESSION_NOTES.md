@@ -405,3 +405,34 @@ Build one phase per session, in order (SPEC.md §17). Commit after each phase. W
   bootstrap has no nonce pipeline here — `frame-ancestors`/`base-uri`/`form-action` are the
   load-bearing directives; list endpoints are capped but not truly paginated (default 1000, max
   5000) since the dashboard pages consume plain arrays — real pagination is the follow-up.
+
+- **2026-08-01 — Engine stage toggles** (branch `feature/engine-stage-toggles`, 6 tasks,
+  subagent-driven-development, TDD where applicable, spec-compliance + code-quality review
+  per task). Adds a `Settings` singleton doc (`src/models/Settings.ts`) with two booleans —
+  `draftGenerationEnabled` and `sendingEnabled` — both defaulting to `false`, plus an access
+  layer (`src/lib/settings.ts`) where `getSettings()` and `updateSettings()` share a single
+  atomic `findOneAndUpdate({}, ..., {upsert:true})`. `runSequenceEngine()`
+  (`src/lib/sequence.ts`) now fetches settings once per run and skips `generateDrafts()`/
+  `sendApproved()` whenever the matching flag is off; `RunSummary` gained
+  `draftGenerationEnabled`/`sendingEnabled` fields so a deliberately-paused stage reads
+  differently from an active stage that simply had nothing due. `GET`/`PATCH /api/settings`
+  is session-guarded with a boolean-only whitelist, and a new `/settings` page (9th sidebar
+  entry) exposes both toggles with a one-line caption each. **Why:** lets the user pause
+  automated drafting/sending from any device — the flag lives in Mongo, not per-browser
+  local state — without touching the external cron pinger itself, enabling a safe warm-up
+  sequence (turn drafting on, review the drafts it produces, only then turn sending on)
+  before committing to full automation. **Scope note:** the manual send paths
+  (`/api/send-batch`, `/compose`, the Outreach board's mark-sent) are deliberately untouched
+  by the `sendingEnabled` flag — it gates only the unattended cron stage, not anything the
+  user triggers by hand. **Both flags ship OFF by default**, so deploying this branch does
+  not silently arm automated sending. Two rounds of review-driven fixes landed along the
+  way: `src/lib/settings.ts`'s docstring was corrected after it overclaimed the upsert's
+  race-safety and misdescribed what bumps `updatedAt` (commit `7ae8bad`); and
+  `src/app/settings/page.tsx`'s pending-state UI was fixed so flipping one toggle disables
+  *both* while the request is in flight, instead of only the one clicked (commit `c144ceb`).
+  Verified live via manual browser walkthrough of `/settings` (toggle, reload-persists,
+  reset to off) and a real `/api/cron/sequence` hit with both settings off, which produced
+  `draftsCreated: 0, sent: 0` while `repliesChecked` ran normally — confirming the always-on
+  reply-detection stage is genuinely unaffected by the new gates. Verified: `npm test`
+  (571 tests, up from 566), `npx tsc --noEmit`, `npm run build` (route list includes the
+  new `/settings` page and `/api/settings` route).
