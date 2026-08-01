@@ -18,3 +18,6 @@ export type { ILoginAttempt } from "./LoginAttempt";
 
 export { default as Template } from "./Template";
 export type { ITemplate } from "./Template";
+
+export { default as Settings } from "./Settings";
+export type { ISettings } from "./Settings";
