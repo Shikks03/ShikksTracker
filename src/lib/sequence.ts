@@ -14,6 +14,7 @@ import EmailLog from "@/models/EmailLog";
 import CronRun from "@/models/CronRun";
 import Suppression from "@/models/Suppression";
 import { generateEmailDraft } from "@/lib/draft";
+import { getSettings } from "@/lib/settings";
 import { extractAndRewriteLinks, renderTrackedHtml, htmlEscape } from "@/lib/tracking";
 import {
   sendGmailMessage,
@@ -1049,6 +1050,10 @@ export interface RunSummary {
   actionRemindersDue: number;
   /** True if an action-reminder digest email was sent this run. */
   actionDigestSent: boolean;
+  /** False when this run skipped drafting because /settings has it turned off. */
+  draftGenerationEnabled: boolean;
+  /** False when this run skipped sending because /settings has it turned off. */
+  sendingEnabled: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1284,11 +1289,17 @@ export async function runSequenceEngine(): Promise<RunSummary> {
   // A: Check replies (Phase 9 stub)
   const repliesResult = await checkReplies();
 
-  // B: Generate drafts
-  const draftsResult = await generateDrafts();
+  const settings = await getSettings();
 
-  // C: Send approved
-  const sendsResult = await sendApproved(runStartMs);
+  // B: Generate drafts (skipped when /settings has drafting turned off)
+  const draftsResult = settings.draftGenerationEnabled
+    ? await generateDrafts()
+    : { created: 0, errors: [] };
+
+  // C: Send approved (skipped when /settings has sending turned off)
+  const sendsResult = settings.sendingEnabled
+    ? await sendApproved(runStartMs)
+    : { sent: 0, skipped: [], errors: [] };
 
   // Build a partial summary (without action-reminder fields, which need cronRunId)
   const partialErrors = [...repliesResult.errors, ...draftsResult.errors, ...sendsResult.errors];
@@ -1313,6 +1324,8 @@ export async function runSequenceEngine(): Promise<RunSummary> {
         errors: partialErrors,
         actionRemindersDue: 0,
         actionDigestSent: false,
+        draftGenerationEnabled: settings.draftGenerationEnabled,
+        sendingEnabled: settings.sendingEnabled,
       } satisfies RunSummary,
       errorCount,
       digestSentAt: null,
@@ -1334,6 +1347,8 @@ export async function runSequenceEngine(): Promise<RunSummary> {
       errors: partialErrors,
       actionRemindersDue: 0,
       actionDigestSent: false,
+      draftGenerationEnabled: settings.draftGenerationEnabled,
+      sendingEnabled: settings.sendingEnabled,
     };
   }
 
@@ -1360,6 +1375,8 @@ export async function runSequenceEngine(): Promise<RunSummary> {
     errors: [...partialErrors, ...actionRemindersResult.errors],
     actionRemindersDue: actionRemindersResult.due,
     actionDigestSent: actionRemindersResult.digestSent,
+    draftGenerationEnabled: settings.draftGenerationEnabled,
+    sendingEnabled: settings.sendingEnabled,
   };
 
   // Update the persisted CronRun with final summary (including action-reminder results)
