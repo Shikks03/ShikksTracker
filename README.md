@@ -66,8 +66,13 @@ App is available at `http://localhost:3000`.
 
 ## Project Files
 
-| File | Role |
+The spec, planning and AI-agent context files are kept **local only** — they are
+gitignored and will not be present in a clone.
+
+| File (local, untracked) | Role |
 |---|---|
 | `SPEC.md` | Authoritative technical spec and architecture reference |
-| `CLAUDE.md` | Working summary of decisions made after the spec; the context file fed to Claude Code at the start of each session |
+| `CLAUDE.md` / `AGENTS.md` | Working summary of decisions made after the spec; the context file fed to the coding agent at the start of each session |
 | `SESSION_NOTES.md` | Phase-by-phase build progress log; updated at the end of each session |
+| `GAPS.md` / `IMPLEMENTATION_PLAN.md` | Ranked audit findings and the remediation task list |
+| `docs/superpowers/` | Dated feature specs and implementation plans |

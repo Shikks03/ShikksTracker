@@ -30,15 +30,38 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — NEVER commit real secrets. `.env*` covers .env, .env.local,
+# .env.production, .env.local.bak etc; only the placeholder template is tracked.
 .env*
 !.env.example
 
 # vercel
 .vercel
 
+# ---------------------------------------------------------------------------
+# AI agent + planning artifacts — local working material, not shipped code.
+# These files still live on disk; they are just no longer tracked by git.
+# ---------------------------------------------------------------------------
+
+# agent instruction / config files
+/CLAUDE.md
+/AGENTS.md
+/.claude/
+/.codex/
+/.cursor/
+/.github/copilot-instructions.md
+/GEMINI.md
+
 # brainstorming visual companion sessions
 /.superpowers/
+
+# AI-authored plans, specs, audits and build logs
+/docs/superpowers/
+/docs/design-brief.md
+/IMPLEMENTATION_PLAN.md
+/GAPS.md
+/SESSION_NOTES.md
+/SPEC.md
 
 # typescript
 *.tsbuildinfo

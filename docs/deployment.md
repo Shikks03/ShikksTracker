@@ -83,7 +83,7 @@ End-to-end checklist for going live. Work through the steps in order — each se
 5. Click **Deploy**.
 6. **Note:** Vercel applies environment variable changes only after a redeploy. If you add or update a variable later, trigger a redeploy from the Vercel dashboard (Deployments → Redeploy).
 
-> **Full secrets checklist** (OAuth publishing status, key scoping, spend caps, and rotation runbook): see `CLAUDE.md` § *Secrets & Deployment Security Checklist*.
+> **Full secrets checklist** (OAuth publishing status, key scoping, spend caps, and rotation runbook): see the local, untracked `CLAUDE.md` § *Secrets & Deployment Security Checklist*.
 
 ---
 
