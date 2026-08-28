@@ -1,6 +1,6 @@
 /**
- * sync-indexes.ts — one-time (and re-runnable) index migration for the
- * Contact collection.
+ * sync-indexes.mts — re-runnable index migration for the models listed in
+ * MODELS below (Contact, EmailLog, Variant).
  *
  * WHY THIS EXISTS
  * ---------------
@@ -39,6 +39,24 @@
 
 import mongoose from "mongoose";
 import Contact from "../src/models/Contact.ts";
+import EmailLog from "../src/models/EmailLog.ts";
+import Variant from "../src/models/Variant.ts";
+import type { Model } from "mongoose";
+
+/**
+ * Every model whose indexes this script manages. Adding a model here opts its
+ * collection into the same dry-run diff / apply / verify cycle.
+ *
+ * WARNING: syncIndexes() drops ANY index on a listed collection that is not
+ * declared in that model's schema. Only list models whose schema is the single
+ * source of truth for their indexes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const MODELS: Array<{ label: string; model: Model<any> }> = [
+  { label: "Contact", model: Contact },
+  { label: "EmailLog", model: EmailLog },
+  { label: "Variant", model: Variant },
+];
 
 const APPLY = process.argv.includes("--apply");
 
@@ -66,8 +84,9 @@ function describe(ix: IndexInfo): string {
   return `${(ix.name ?? "(unnamed)").padEnd(34)} ${bits.join(" · ")}`;
 }
 
-async function listIndexes(label: string): Promise<IndexInfo[]> {
-  const indexes = (await Contact.collection.indexes()) as IndexInfo[];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function listIndexes(model: Model<any>, label: string): Promise<IndexInfo[]> {
+  const indexes = (await model.collection.indexes()) as IndexInfo[];
   console.log(`\n── ${label} ${"─".repeat(Math.max(0, 58 - label.length))}`);
   for (const ix of indexes) console.log("   " + describe(ix));
   return indexes;
@@ -95,20 +114,32 @@ async function main(): Promise<number> {
   await mongoose.connect(uri, { bufferCommands: false, serverSelectionTimeoutMS: 10_000 });
   console.log(`Database:      ${mongoose.connection.db?.databaseName ?? "(unknown)"}`);
 
-  await listIndexes("BEFORE");
+  // --- Phase 1: show the diff for every managed model ---
+  let anyChange = false;
+  const plans: Array<{ label: string; toDrop: string[]; toCreate: Record<string, unknown>[] }> = [];
 
-  // diffIndexes reports what syncIndexes WOULD do, without doing it.
-  const diff = (await Contact.diffIndexes()) as {
-    toDrop: string[];
-    toCreate: Record<string, unknown>[];
-  };
+  for (const { label, model } of MODELS) {
+    await listIndexes(model, `${label} — BEFORE`);
+
+    // diffIndexes reports what syncIndexes WOULD do, without doing it.
+    const diff = (await model.diffIndexes()) as {
+      toDrop: string[];
+      toCreate: Record<string, unknown>[];
+    };
+    plans.push({ label, ...diff });
+    if (diff.toDrop.length || diff.toCreate.length) anyChange = true;
+  }
 
   console.log(`\n── PLANNED CHANGES ${"─".repeat(43)}`);
-  if (diff.toDrop.length === 0 && diff.toCreate.length === 0) {
-    console.log("   Nothing to do — the live indexes already match the schema.");
+  if (!anyChange) {
+    console.log("   Nothing to do — the live indexes already match the schemas.");
   } else {
-    for (const name of diff.toDrop) console.log(`   DROP    ${name}`);
-    for (const spec of diff.toCreate) console.log(`   CREATE  ${JSON.stringify(spec)}`);
+    for (const plan of plans) {
+      if (!plan.toDrop.length && !plan.toCreate.length) continue;
+      console.log(`   [${plan.label}]`);
+      for (const name of plan.toDrop) console.log(`     DROP    ${name}`);
+      for (const spec of plan.toCreate) console.log(`     CREATE  ${JSON.stringify(spec)}`);
+    }
   }
 
   if (!APPLY) {
@@ -122,24 +153,31 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  if (diff.toDrop.length === 0 && diff.toCreate.length === 0) {
+  if (!anyChange) {
     await mongoose.disconnect();
     return 0;
   }
 
+  // --- Phase 2: apply ---
   console.log("\nApplying…");
-  const dropped = await Contact.syncIndexes();
-  console.log(`   syncIndexes() dropped: ${JSON.stringify(dropped)}`);
+  for (const { label, model } of MODELS) {
+    const dropped = await model.syncIndexes();
+    console.log(`   [${label}] syncIndexes() dropped: ${JSON.stringify(dropped)}`);
+  }
 
-  const after = await listIndexes("AFTER");
+  const contactAfter = await listIndexes(Contact, "Contact — AFTER");
+  for (const { label, model } of MODELS) {
+    if (label === "Contact") continue;
+    await listIndexes(model, `${label} — AFTER`);
+  }
 
-  // Verify the two indexes that motivated this migration really are partial.
-  // A plain-unique survivor here is the exact failure mode we are fixing, so
-  // fail loudly rather than reporting success.
+  // Verify the two Contact indexes that motivated this migration really are
+  // partial. A plain-unique survivor here is the exact failure mode this script
+  // exists to fix, so fail loudly rather than reporting success.
   console.log(`\n── VERIFICATION ${"─".repeat(46)}`);
   let ok = true;
   for (const { name, field } of EXPECTED_PARTIAL) {
-    const ix = after.find((i) => i.name === name);
+    const ix = contactAfter.find((i) => i.name === name);
     if (!ix) {
       console.error(`   MISSING  ${name} — expected it to exist after sync`);
       ok = false;
@@ -170,7 +208,7 @@ async function main(): Promise<number> {
     console.error("\nMigration did NOT reach the expected state. Do not import scraper CSVs yet.");
     return 1;
   }
-  console.log("\nDone. Email-less (scraped) contacts can now be inserted.");
+  console.log("\nDone. Indexes match the schemas for: " + MODELS.map((m) => m.label).join(", ") + ".");
   return 0;
 }
 
