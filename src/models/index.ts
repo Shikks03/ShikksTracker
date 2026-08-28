@@ -21,3 +21,6 @@ export type { ITemplate } from "./Template";
 
 export { default as Settings } from "./Settings";
 export type { ISettings } from "./Settings";
+
+export { default as Variant } from "./Variant";
+export type { IVariant } from "./Variant";

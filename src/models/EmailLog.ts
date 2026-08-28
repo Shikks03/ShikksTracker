@@ -44,6 +44,28 @@ export interface IEmailLog extends Document {
   lastSendError: string | null;
   /** Set when a non-email (facebook/instagram/phone) log is manually marked sent from the dashboard, since there is no Gmail send event to timestamp it. */
   sentManuallyAt: Date | null;
+  /**
+   * Which message approach (Variant.key) produced this log's copy, or null for
+   * logs written before variants existed and for drafts generated when no
+   * active variant matched their channel+stage. Powers the per-approach reply
+   * rates in GET /api/os/variant-stats.
+   */
+  variantKey: string | null;
+  /**
+   * Provenance. "app" = this application drafted it (sequence engine, /compose,
+   * templates). "rikuos" = created through POST /api/os/drafts from RikuOS's
+   * approval queue. Legacy logs have no stored field and read as "app".
+   */
+  origin: "app" | "rikuos";
+  /**
+   * The `sent` log this message directly answers. Set only by
+   * POST /api/os/drafts. Two effects at send time (src/lib/sequence.ts):
+   *   1. It is the threading anchor — In-Reply-To / References / threadId come
+   *      from this log instead of the stage-based lookup.
+   *   2. Its presence is one of the two markers that let sendOneLog deliver to
+   *      a contact whose status is "replied" (see src/lib/sendGuards.ts).
+   */
+  replyToLogId: Types.ObjectId | null;
   /** Set by Mongoose `timestamps` on insert. Enables draft-age display and reliable ordering (previously ordering relied on _id). */
   createdAt: Date;
 }
@@ -114,6 +136,9 @@ const EmailLogSchema = new Schema<IEmailLog>({
   // truncateForStorage() in src/lib/sequence.ts BEFORE reaching this schema.
   lastSendError: { type: String, default: null, maxlength: 2000 },
   sentManuallyAt: { type: Date, default: null },
+  variantKey: { type: String, default: null, maxlength: 100 },
+  origin: { type: String, enum: ["app", "rikuos"], default: "app" },
+  replyToLogId: { type: Schema.Types.ObjectId, ref: "EmailLog", default: null },
 }, {
   // createdAt only — matches Contact/Campaign convention. Existing docs simply
   // lack the field (fine). No updatedAt: EmailLog mutates constantly (tracking
@@ -133,6 +158,16 @@ EmailLogSchema.index({ status: 1 });
 EmailLogSchema.index({ status: 1, sentAt: 1 });
 // Pixel lookups
 EmailLogSchema.index({ trackingPixelId: 1 }, { sparse: true });
+// Variant stats aggregation (GET /api/os/variant-stats) groups sent logs by
+// variantKey. PARTIAL, not sparse: variantKey is null on almost every log, and
+// a *compound* sparse index still indexes any document that has at least one of
+// the keys — `status` is always present, so `sparse` would index the entire
+// collection and save nothing. Same trap already documented on Contact's
+// sourcePlaceId index (src/models/Contact.ts).
+EmailLogSchema.index(
+  { variantKey: 1, status: 1 },
+  { partialFilterExpression: { variantKey: { $type: "string" } } }
+);
 
 const EmailLog =
   (mongoose.models.EmailLog as mongoose.Model<IEmailLog>) ||
