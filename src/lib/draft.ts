@@ -29,6 +29,13 @@ export interface DraftInput {
    */
   feedback?: string;
   /**
+   * The selected Variant's `promptNotes` — a one-paragraph description of the
+   * approach this draft should take (pain-point-first, compliment-first, …).
+   * Appended verbatim to the user message. Absent/empty means "no particular
+   * approach", and the prompt is then byte-identical to before variants existed.
+   */
+  variantNotes?: string;
+  /**
    * Outreach channel this draft is for. Defaults to "email" when omitted —
    * every existing caller (pre multi-channel) implicitly means email, and
    * that path must stay byte-identical to before this field existed.
@@ -173,6 +180,18 @@ export function buildUserMessage(input: DraftInput): string {
     }
   }
 
+  // Placed after the previous-touch context and BEFORE the rejected-draft
+  // section: the approach is standing guidance, the rejection is corrective
+  // feedback about this specific attempt, and the corrective note should be the
+  // last thing the model reads.
+  if (input.variantNotes) {
+    lines.push(
+      "\n--- MESSAGE APPROACH (write to this strategy) ---",
+      input.variantNotes,
+      "--- END MESSAGE APPROACH ---"
+    );
+  }
+
   if (input.previousAttempt) {
     lines.push(
       "\n--- REJECTED DRAFT (do NOT repeat this) ---",
@@ -235,6 +254,14 @@ export function buildChannelUserMessage(
       lines.push(`\n--- Message ${i + 1} ---`);
       lines.push(prev.body);
     }
+  }
+
+  if (input.variantNotes) {
+    lines.push(
+      "\n--- MESSAGE APPROACH (write to this strategy) ---",
+      input.variantNotes,
+      "--- END MESSAGE APPROACH ---"
+    );
   }
 
   if (input.previousAttempt) {

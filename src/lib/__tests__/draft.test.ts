@@ -432,3 +432,61 @@ describe("generateEmailDraft — channel branching", () => {
     await expect(generateEmailDraft(BASE_INPUT)).rejects.toThrow(/empty body/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// variantNotes (Feature C) — the message-approach strategy injected into the
+// prompt. Must be absent unless supplied, so every existing byte-for-byte
+// expectation on these builders keeps holding.
+// ---------------------------------------------------------------------------
+
+describe("variantNotes injection", () => {
+  const base = {
+    offerSummary: "We build simple booking sites.",
+    toneNotes: "casual",
+    businessName: "Kape Kalye",
+    keyPoints: "Third-wave cafe in Cebu, no website yet.",
+    stage: 1 as const,
+  };
+
+  it("omits the approach section entirely when variantNotes is absent", () => {
+    expect(buildUserMessage(base)).not.toContain("MESSAGE APPROACH");
+  });
+
+  it("omits the approach section when variantNotes is an empty string", () => {
+    expect(buildUserMessage({ ...base, variantNotes: "" })).not.toContain("MESSAGE APPROACH");
+  });
+
+  it("appends the approach section when variantNotes is supplied", () => {
+    const msg = buildUserMessage({ ...base, variantNotes: "Open with the pain point." });
+    expect(msg).toContain("--- MESSAGE APPROACH (write to this strategy) ---");
+    expect(msg).toContain("Open with the pain point.");
+    expect(msg).toContain("--- END MESSAGE APPROACH ---");
+  });
+
+  it("appends the approach section on the non-email builder too", () => {
+    const msg = buildChannelUserMessage({
+      ...base,
+      channel: "facebook",
+      variantNotes: "Lead with a specific compliment.",
+    });
+    expect(msg).toContain("--- MESSAGE APPROACH (write to this strategy) ---");
+    expect(msg).toContain("Lead with a specific compliment.");
+  });
+
+  it("places the approach BEFORE the rejected-draft section, so corrective feedback reads last", () => {
+    const msg = buildUserMessage({
+      ...base,
+      variantNotes: "Open with the pain point.",
+      previousAttempt: { subject: "S", body: "B" },
+      feedback: "Too salesy.",
+    });
+    const approachAt = msg.indexOf("MESSAGE APPROACH");
+    const rejectedAt = msg.indexOf("REJECTED DRAFT");
+    // Assert both sections are actually present first. Without this, an absent
+    // approach section makes indexOf return -1, which is trivially less than
+    // the rejected-draft index and the ordering assertion passes vacuously.
+    expect(approachAt).toBeGreaterThan(-1);
+    expect(rejectedAt).toBeGreaterThan(-1);
+    expect(approachAt).toBeLessThan(rejectedAt);
+  });
+});
