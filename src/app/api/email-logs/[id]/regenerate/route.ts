@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import EmailLog from "@/models/EmailLog";
 import Contact from "@/models/Contact";
 import Campaign from "@/models/Campaign";
+import Variant from "@/models/Variant";
 import { generateEmailDraft } from "@/lib/draft";
 import { handleError, notFound } from "@/lib/api";
 import type { IContact } from "@/models/Contact";
@@ -106,6 +107,18 @@ export async function POST(
       body: l.body,
     }));
 
+    // Spec §Feature C: "Regeneration keeps the original variant." The log's
+    // variantKey is never rewritten here, so we re-load that variant's notes and
+    // feed them back in — otherwise a regenerated draft would drift to a
+    // different approach while still being *labelled* with the original one,
+    // quietly corrupting the per-variant reply rates.
+    // An inactive (or since-deleted) variant is still honoured: the stamp on
+    // this log is a historical fact, not a live selection.
+    const variantNotes = log.variantKey
+      ? (await Variant.findOne({ key: log.variantKey }).select({ promptNotes: 1 }).lean())
+          ?.promptNotes
+      : undefined;
+
     // Generate a new draft via Claude, passing the current draft as
     // previousAttempt so Claude knows what not to repeat.
     let newDraft: { subject: string; body: string };
@@ -126,6 +139,7 @@ export async function POST(
         // channel is omitted. log.channel is always set (schema default
         // "email"), so this is safe for legacy logs too.
         channel: log.channel,
+        variantNotes,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

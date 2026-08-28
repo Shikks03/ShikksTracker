@@ -32,6 +32,7 @@ import { suppressContact } from "@/lib/contacts";
 import { envInt } from "@/lib/env";
 import { isNonEmailChannel } from "@/lib/outreachLogs";
 import { isSendableContactStatus } from "@/lib/sendGuards";
+import { pickVariantForDraft } from "@/lib/variants";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -564,6 +565,15 @@ async function generateDrafts(): Promise<DraftsResult> {
         continue;
       }
 
+      // Message-approach selection (Feature C). Null is normal and legal:
+      // channel/stage combinations with no active variant simply draft as
+      // before, with variantKey null.
+      const variant = await pickVariantForDraft({
+        channel: contact.outreachChannel ?? "email",
+        stage: targetStage,
+        campaignId: contact.campaignId,
+      });
+
       // Gather previous sent logs for continuity context
       const previousLogs = await EmailLog.find({
         contactId: contact._id,
@@ -591,6 +601,7 @@ async function generateDrafts(): Promise<DraftsResult> {
         stage: targetStage,
         previousEmails: previousEmails.length ? previousEmails : undefined,
         channel: contact.outreachChannel,
+        variantNotes: variant?.promptNotes,
       });
 
       // Persist as draft — channel carried onto the log so downstream queries
@@ -604,6 +615,7 @@ async function generateDrafts(): Promise<DraftsResult> {
         subject: draft.subject,
         body: draft.body,
         channel: contact.outreachChannel,
+        variantKey: variant?.key ?? null,
       });
 
       result.created++;
