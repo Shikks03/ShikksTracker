@@ -104,3 +104,75 @@ export async function requireSession(request: NextRequest): Promise<NextResponse
 
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// RikuOS API guard (/api/os/*) — spec §D.1
+// ---------------------------------------------------------------------------
+
+/** Minimum length for OS_API_SECRET, mirroring SESSION_SECRET's floor. */
+export const OS_API_SECRET_MIN_LENGTH = 32;
+
+export type OsSecretCheck =
+  | { ok: true }
+  | { ok: false; httpStatus: 401 | 503; error: string };
+
+/**
+ * Pure guard for the /api/os/* surface.
+ *
+ * Split from requireOsSecret so the rule is unit-testable without constructing
+ * a NextRequest — the same pure-helper convention as checkMarkSentAllowed in
+ * src/lib/outreachLogs.ts.
+ *
+ * Fails CLOSED (503) on a missing OR too-short secret. A short secret is
+ * treated as no secret: these endpoints hand out contact bodies, reply snippets
+ * and campaign copy to whoever presents the header, so a guessable value is not
+ * a lesser form of protection, it is the absence of it.
+ *
+ * The comparison is timing-safe. Both sides are SHA-256'd first so the buffers
+ * are always equal length — timingSafeEqual throws on a length mismatch, and
+ * that throw would itself leak the secret's length. Same construction as
+ * requireCronSecret above.
+ */
+export function checkOsSecret(
+  provided: string | null,
+  secret: string | undefined
+): OsSecretCheck {
+  if (!secret || secret.length < OS_API_SECRET_MIN_LENGTH) {
+    return {
+      ok: false,
+      httpStatus: 503,
+      error: `OS_API_SECRET is not configured (it must be at least ${OS_API_SECRET_MIN_LENGTH} characters).`,
+    };
+  }
+
+  const isValid = timingSafeEqual(sha256(provided ?? ""), sha256(secret));
+  if (!isValid) {
+    return {
+      ok: false,
+      httpStatus: 401,
+      error: "Unauthorized: missing or invalid x-os-secret header.",
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Route-handler wrapper around checkOsSecret, mirroring requireCronSecret's
+ * shape: call it as the first statement of a handler and return a non-null
+ * result immediately.
+ *
+ * NOTE on CSRF: unlike requireSession, this performs no Origin check, and it
+ * does not need one. CSRF exists because a browser attaches an ambient
+ * credential (the session cookie) to a cross-site request automatically. There
+ * is no ambient credential here — the caller must explicitly set x-os-secret,
+ * which a cross-site page cannot do without already knowing the secret.
+ */
+export function requireOsSecret(request: NextRequest): NextResponse | null {
+  const result = checkOsSecret(
+    request.headers.get("x-os-secret"),
+    process.env.OS_API_SECRET
+  );
+  if (result.ok) return null;
+  return NextResponse.json({ error: result.error }, { status: result.httpStatus });
+}

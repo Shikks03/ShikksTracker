@@ -7,6 +7,7 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/session";
  * Public paths:
  *   /api/track/*       — recipient-facing pixel/click endpoints
  *   /api/cron/*        — guarded by x-cron-secret; leave that mechanism intact
+ *   /api/os/*          — guarded by x-os-secret (RikuOS); see requireOsSecret
  *   /api/health        — exact match
  *   /login             — exact match (the login page itself)
  *   /api/auth/login    — exact match (the login POST handler)
@@ -33,6 +34,11 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/track/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/api/unsubscribe/") || // recipients click this; they are NOT logged in
+    // RikuOS (a separate app in ../RikuOS) calls these server-to-server and has
+    // no session cookie. Session-exempt but NOT unguarded: every /api/os/*
+    // handler calls requireOsSecret() as its first statement — the same
+    // arrangement as /api/cron/* and x-cron-secret.
+    pathname.startsWith("/api/os/") ||
     pathname.startsWith("/_next/")
   ) {
     return true;
