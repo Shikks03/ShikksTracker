@@ -31,6 +31,7 @@ import { applyPlaceholders } from "@/lib/compose";
 import { suppressContact } from "@/lib/contacts";
 import { envInt } from "@/lib/env";
 import { isNonEmailChannel } from "@/lib/outreachLogs";
+import { isSendableContactStatus } from "@/lib/sendGuards";
 
 // ---------------------------------------------------------------------------
 // Config constants (env-overridable, sane defaults)
@@ -626,6 +627,51 @@ export interface SendOneLogResult {
   error?: string;
 }
 
+/** The fields the threading block reads off the anchor log. */
+type ThreadingAnchor = Pick<IEmailLog, "gmailThreadId" | "rfcMessageId" | "subject">;
+
+/**
+ * Resolves the log whose Gmail headers this send should thread onto.
+ *
+ * Precedence:
+ *  1. An explicit `replyToLogId` (set only by POST /api/os/drafts). A RikuOS
+ *     response must thread onto the exact message it answers, which is not
+ *     necessarily the highest-stage prior send. The lookup is scoped to the
+ *     same contact AND to `status: "sent"`, so a caller-supplied id can never
+ *     point the thread at another contact's message or at an unsent draft.
+ *  2. Otherwise the pre-existing rule, unchanged: for stage 2–3, the
+ *     highest-stage prior `sent` log for this contact.
+ *  3. Stage 1 with no replyToLogId → null (no threading), as before.
+ *
+ * For every log written before replyToLogId existed this returns exactly what
+ * the previous inline `if (log.stage > 1)` query returned.
+ */
+async function resolveThreadingAnchor(
+  log: IEmailLog,
+  contactId: Types.ObjectId
+): Promise<ThreadingAnchor | null> {
+  if (log.replyToLogId) {
+    const explicit = (await EmailLog.findOne({
+      _id: log.replyToLogId,
+      contactId,
+      status: "sent",
+    }).lean()) as ThreadingAnchor | null;
+    if (explicit) return explicit;
+  }
+
+  if (log.stage > 1) {
+    return (await EmailLog.findOne({
+      contactId,
+      stage: { $lt: log.stage },
+      status: "sent",
+    })
+      .sort({ stage: -1 })
+      .lean()) as ThreadingAnchor | null;
+  }
+
+  return null;
+}
+
 /**
  * Sends one approved EmailLog. Handles threading, tracking, Gmail send,
  * post-send EmailLog/Contact updates. Called by both the sequence engine
@@ -677,14 +723,19 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
   try {
     // Load contact
     const contact = await Contact.findById(log.contactId).lean() as IContact | null;
-    if (!contact || contact.status !== "active") {
-      // Revert to draft — contact is gone or inactive; no point retrying
+    if (!contact || !isSendableContactStatus(contact.status, log)) {
+      // Revert to draft — the contact is gone, or its status does not permit
+      // THIS log to be sent. See src/lib/sendGuards.ts for the narrow "replied"
+      // permit that RikuOS response drafts depend on. No point retrying either
+      // way, so "draft" (not "approved") is correct.
       await EmailLog.findByIdAndUpdate(log._id, { status: "draft", sendAttemptedAt: null });
       return {
         status: "skipped",
         contactName: contact?.businessName ?? "unknown",
         subject: log.subject,
-        error: "contact not active — reverted to draft",
+        error: contact
+          ? `contact status "${contact.status}" does not permit sending this log — reverted to draft`
+          : "contact not found — reverted to draft",
       };
     }
 
@@ -748,46 +799,39 @@ export async function sendOneLog(log: IEmailLog): Promise<SendOneLogResult> {
       };
     }
 
-    // Threading for stages 2–3
+    // Threading. Anchor resolution lives in resolveThreadingAnchor() so an
+    // explicit replyToLogId (RikuOS response drafts) can take precedence over
+    // the stage-based lookup. Everything below this line is unchanged.
     let threadId: string | undefined;
     let inReplyTo: string | undefined;
     let references: string | undefined;
     let subjectToSend = log.subject;
 
-    if (log.stage > 1) {
-      const prevLog = await EmailLog.findOne({
-        contactId: contact._id,
-        stage: { $lt: log.stage },
-        status: "sent",
-      })
-        .sort({ stage: -1 })
-        .lean();
+    const prevLog = await resolveThreadingAnchor(log, contact._id as Types.ObjectId);
+    if (prevLog) {
+      if (prevLog.gmailThreadId) threadId = prevLog.gmailThreadId;
+      if (prevLog.rfcMessageId) inReplyTo = prevLog.rfcMessageId;
 
-      if (prevLog) {
-        if (prevLog.gmailThreadId) threadId = prevLog.gmailThreadId;
-        if (prevLog.rfcMessageId) inReplyTo = prevLog.rfcMessageId;
-
-        // Build References oldest-first (RFC 5322): stage-1 first, then prevLog
-        let stage1RfcMessageId: string | null | undefined;
-        if (log.stage === 3) {
-          const stage1Log = await EmailLog.findOne({
-            contactId: contact._id,
-            stage: 1,
-            status: "sent",
-          }).lean();
-          stage1RfcMessageId = stage1Log?.rfcMessageId;
-        }
-        const refParts = [stage1RfcMessageId, prevLog.rfcMessageId];
-        const uniqueRefs = [...new Set(refParts.filter(Boolean))];
-        if (uniqueRefs.length) references = uniqueRefs.join(" ");
-
-        subjectToSend = prevLog.subject.startsWith("Re:")
-          ? prevLog.subject
-          : `Re: ${prevLog.subject}`;
-
-        log.subject = subjectToSend;
-        await EmailLog.findByIdAndUpdate(log._id, { subject: subjectToSend });
+      // Build References oldest-first (RFC 5322): stage-1 first, then prevLog
+      let stage1RfcMessageId: string | null | undefined;
+      if (log.stage === 3) {
+        const stage1Log = await EmailLog.findOne({
+          contactId: contact._id,
+          stage: 1,
+          status: "sent",
+        }).lean();
+        stage1RfcMessageId = stage1Log?.rfcMessageId;
       }
+      const refParts = [stage1RfcMessageId, prevLog.rfcMessageId];
+      const uniqueRefs = [...new Set(refParts.filter(Boolean))];
+      if (uniqueRefs.length) references = uniqueRefs.join(" ");
+
+      subjectToSend = prevLog.subject.startsWith("Re:")
+        ? prevLog.subject
+        : `Re: ${prevLog.subject}`;
+
+      log.subject = subjectToSend;
+      await EmailLog.findByIdAndUpdate(log._id, { subject: subjectToSend });
     }
 
     // Placeholder substitution at send time — case-insensitive and
