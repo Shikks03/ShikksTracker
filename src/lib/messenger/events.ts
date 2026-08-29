@@ -7,9 +7,14 @@
  * unrecognised is dropped silently and returns [].
  */
 
-/** Matches MessengerMessage.text's maxlength. Truncated here, at the write
- *  site, per the security-phase-2 rule for third-party text. */
-export const MESSENGER_TEXT_MAX_LEN = 10_000;
+/** Just under MessengerMessage.text's 10000 maxlength — same convention as
+ *  REPLY_BODY_MAX_LEN in src/lib/replies.ts. The headroom matters: truncation
+ *  appends an ellipsis, so slicing to exactly the schema cap yields cap+1 and
+ *  overflows it. (Today the insert is an updateOne, which does not run
+ *  validators, so it would persist over-length rather than throw — a trap
+ *  waiting on whoever converts that write to .create().) Truncated here, at
+ *  the write site, per the security-phase-2 rule for third-party text. */
+export const MESSENGER_TEXT_MAX_LEN = 9_900;
 
 export interface MessengerEvent {
   psid: string;
@@ -20,13 +25,23 @@ export interface MessengerEvent {
 }
 
 /** `.slice()` counts UTF-16 code units and Messenger text is full of emoji, so
- *  a naive slice can split a surrogate pair. Array.from splits on code points.
- *  Same rationale as truncateReplyBody in src/lib/replies.ts. */
+ *  a naive slice can split a surrogate pair — cut on code points instead.
+ *
+ *  But the BOUND has to stay in UTF-16 units, because that is what Mongoose's
+ *  maxlength counts. Bounding on code points alone is not equivalent: an emoji
+ *  is one code point and two units, so 9,900 emoji is 19,800 units — nearly
+ *  double the schema cap, silently stored (updateOne does not run validators)
+ *  by a function whose entire job is to keep third-party text inside it.
+ *  Cut on code points, measure in units. */
 function truncateText(text: string): string {
   if (text.length <= MESSENGER_TEXT_MAX_LEN) return text;
-  const chars = Array.from(text);
-  if (chars.length <= MESSENGER_TEXT_MAX_LEN) return text;
-  return chars.slice(0, MESSENGER_TEXT_MAX_LEN).join("") + "…";
+
+  let out = "";
+  for (const ch of text) {
+    if (out.length + ch.length > MESSENGER_TEXT_MAX_LEN) break;
+    out += ch;
+  }
+  return out + "…";
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

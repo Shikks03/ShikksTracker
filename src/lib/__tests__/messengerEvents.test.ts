@@ -127,6 +127,25 @@ describe("parseMessengerPayload", () => {
     expect(Array.from(text).length).toBeLessThanOrEqual(MESSENGER_TEXT_MAX_LEN + 1);
     // No lone surrogate at the cut point.
     expect(text).toBe(Array.from(text).join(""));
+    // And it must fit MessengerMessage.text's maxlength, which counts UTF-16
+    // units — not code points. An all-emoji message is the case that separates
+    // the two: bounding on code points alone leaves it at ~2x the cap.
+    expect(text.length).toBeLessThanOrEqual(10_000);
+  });
+
+  it("keeps an emoji-only message inside the schema's UTF-16 cap", () => {
+    const long = "😀".repeat(9_000); // 9,000 code points, 18,000 UTF-16 units
+    const payload = {
+      object: "page",
+      entry: [{ id: "P", time: 1, messaging: [{
+        sender: { id: "U" }, recipient: { id: "P" }, timestamp: 1,
+        message: { mid: "m", text: long },
+      }] }],
+    };
+    const { text } = parseMessengerPayload(payload)[0];
+    expect(text.length).toBeLessThanOrEqual(10_000);
+    expect(text.endsWith("…")).toBe(true);
+    expect(text).toBe(Array.from(text).join(""));
   });
 
   it("returns [] rather than throwing on structurally junk input", () => {

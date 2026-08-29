@@ -4,6 +4,7 @@ const findOne = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const deleteMany = vi.fn();
 const contactUpdate = vi.fn();
+const contactClaim = vi.fn();
 const bump = vi.fn();
 
 vi.mock("@/models/EmailLog", () => ({
@@ -14,7 +15,10 @@ vi.mock("@/models/EmailLog", () => ({
   },
 }));
 vi.mock("@/models/Contact", () => ({
-  default: { findByIdAndUpdate: (...a: unknown[]) => contactUpdate(...a) },
+  default: {
+    findByIdAndUpdate: (...a: unknown[]) => contactUpdate(...a),
+    findOneAndUpdate: (...a: unknown[]) => contactClaim(...a),
+  },
 }));
 vi.mock("@/lib/scoring", () => ({
   SCORE_REPLY: 10,
@@ -35,6 +39,8 @@ beforeEach(() => {
   deleteMany.mockResolvedValue({ deletedCount: 0 });
   findByIdAndUpdate.mockResolvedValue(null);
   contactUpdate.mockResolvedValue(null);
+  // Default: the conditional claim succeeds (contact was not yet "replied").
+  contactClaim.mockResolvedValue({ _id: CONTACT });
   bump.mockResolvedValue(null);
 });
 
@@ -78,8 +84,51 @@ describe("applyReplyEffects", () => {
     // No anchor to stamp, but a human DID reply — the contact must leave the
     // cold sequence regardless, or it keeps getting follow-ups.
     expect(res).toEqual({ applied: true, logId: null });
-    expect(contactUpdate).toHaveBeenCalled();
+    expect(contactClaim).toHaveBeenCalledWith(
+      { _id: CONTACT, status: { $ne: "replied" } },
+      { status: "replied", pipelineStage: "replied", nextSendAt: null }
+    );
     expect(bump).toHaveBeenCalledWith(CONTACT, 10);
+  });
+
+  it("is idempotent with NO anchor log: a second inbound message changes nothing", async () => {
+    // The Messenger case with no sent log — a prospect who messaged the page
+    // first. The `replied` flag has nowhere to live, so the contact's own
+    // status is the gate. Without it, every inbound message re-applied
+    // everything: +10 each time, and pipelineStage dragged back to "replied"
+    // from wherever the user had moved it. Reproduced against a live contact
+    // (10 -> 20, call_booked -> replied) before this gate existed.
+    findOne.mockReturnValue(chain(null));
+    contactClaim.mockResolvedValue(null); // already "replied" -> claim fails
+
+    const res = await applyReplyEffects({
+      contactId: CONTACT, channel: "facebook", replyText: "second message", repliedAt: new Date(),
+    });
+
+    expect(res).toEqual({ applied: false, logId: null });
+    expect(bump).not.toHaveBeenCalled();
+    expect(contactUpdate).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("claims the contact conditionally, never with a blind write", async () => {
+    // A read-then-write would let two concurrent webhook deliveries both pass
+    // the check. The claim must be one conditional update.
+    findOne.mockReturnValue(chain(null));
+    await applyReplyEffects({
+      contactId: CONTACT, channel: "facebook", replyText: "hi", repliedAt: new Date(),
+    });
+    expect(contactUpdate).not.toHaveBeenCalled();
+    expect(contactClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the anchored path on its blind update — the log carries the gate", async () => {
+    findOne.mockReturnValue(chain(LOG));
+    await applyReplyEffects({
+      contactId: CONTACT, channel: "facebook", replyText: "hi", repliedAt: new Date(),
+    });
+    expect(contactUpdate).toHaveBeenCalled();
+    expect(contactClaim).not.toHaveBeenCalled();
   });
 
   it("scopes the anchor lookup to the channel", async () => {

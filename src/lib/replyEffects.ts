@@ -33,9 +33,13 @@ export interface ReplyEffectsInput {
 }
 
 export interface ReplyEffectsResult {
-  /** false = the anchor was already marked replied, so nothing was changed.
+  /** false = this reply was already accounted for, so nothing was changed.
    *  The score bump is gated on this: retroactive linking replays effects for
-   *  every message already stored, and +10 per message would be nonsense. */
+   *  every message already stored, and +10 per message would be nonsense.
+   *
+   *  Two independent gates, because there are two cases:
+   *    - a sent log exists  -> its `replied` flag is the gate;
+   *    - no sent log exists -> the contact's own `status` is the gate. */
   applied: boolean;
   logId: string | null;
 }
@@ -66,11 +70,32 @@ export async function applyReplyEffects(
   }
 
   // 1. Contact leaves the cold sequence.
-  await Contact.findByIdAndUpdate(contactId, {
-    status: "replied",
-    pipelineStage: "replied",
-    nextSendAt: null,
-  });
+  if (anchor) {
+    await Contact.findByIdAndUpdate(contactId, {
+      status: "replied",
+      pipelineStage: "replied",
+      nextSendAt: null,
+    });
+  } else {
+    // NO ANCHOR = NO IDEMPOTENCY FLAG. The gate above lives on the sent log,
+    // so without one every inbound message re-applies everything: +10 each
+    // time, and pipelineStage dragged back to "replied" from wherever the user
+    // had since moved it (call_booked, won...). That is not an edge case on
+    // Messenger — a prospect messaging the page before we ever contacted them
+    // has no sent log by definition, and each of their follow-up messages
+    // arrives as a separate webhook event calling straight back into here.
+    //
+    // So fall back to the contact's own status as the gate, and CLAIM it with
+    // a conditional update rather than read-then-write: two webhook deliveries
+    // can be in flight at once, and a read-then-write would let both through.
+    // Verified against a live contact 2026-08-30 — before this, link/relink
+    // took engagementScore 10 -> 20 and reverted call_booked -> replied.
+    const claimed = await Contact.findOneAndUpdate(
+      { _id: contactId, status: { $ne: "replied" } },
+      { status: "replied", pipelineStage: "replied", nextSendAt: null }
+    );
+    if (!claimed) return { applied: false, logId: null };
+  }
 
   // 2. Stamp the anchor, if there is one. There may not be: a prospect can
   //    message the page before we ever contacted them.

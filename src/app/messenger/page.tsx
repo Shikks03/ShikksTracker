@@ -113,6 +113,31 @@ function messengerThreadUrl(psid: string): string {
   return `https://www.facebook.com/messages/t/${encodeURIComponent(psid)}`;
 }
 
+/**
+ * What to call a conversation in the UI.
+ *
+ * `displayName` is "" — NOT null — whenever the Graph profile lookup failed,
+ * and it fails for every conversation until META_PAGE_TOKEN is configured
+ * (src/lib/messenger/profile.ts returns "" on any error, by design, so a
+ * profile failure never blocks ingestion). `??` treats "" as a present value,
+ * so it rendered a completely nameless row and a nameless thread header.
+ * Fall back on EMPTINESS, not on nullishness.
+ *
+ * The psid tail is the last resort rather than a bare "(unknown)": two
+ * unnamed conversations must still be distinguishable in the list.
+ */
+function conversationTitle(
+  businessName: string | null | undefined,
+  displayName: string | null | undefined,
+  psid: string
+): string {
+  return (
+    businessName?.trim() ||
+    displayName?.trim() ||
+    `Unknown · ${psid.slice(-6)}`
+  );
+}
+
 function ordinalStage(stage: 1 | 2 | 3): string {
   if (stage === 1) return "1ST";
   if (stage === 2) return "2ND";
@@ -375,13 +400,24 @@ export default function MessengerPage() {
                 {conversations.map((conv, idx) => {
                   const isSelected = selectedId === conv._id;
                   const isUnlinked = conv.linkStatus === "unlinked";
-                  const title = conv.contact?.businessName ?? conv.displayName ?? "(unknown)";
+                  const title = conversationTitle(
+                    conv.contact?.businessName,
+                    conv.displayName,
+                    conv.psid
+                  );
                   const linking = linkingIds.has(conv._id);
                   const ignoring = ignoringIds.has(conv._id);
                   const query = searchQueries[conv._id] ?? "";
+                  // Every channel is searchable, facebook-channel contacts
+                  // ranked first. Restricting the search to facebook-channel
+                  // contacts (as this once did) left NO way to link a
+                  // conversation from a lead imported as phone/instagram/email
+                  // — and those leads DM the page too; deriveChannel only
+                  // records the best vector we scraped, not the only one they
+                  // own. The suggestion chips stay facebook-only on purpose:
+                  // ranking across every contact would surface noise.
                   const matches = query.trim().length > 0 && allContacts
                     ? allContacts
-                        .filter((c) => c.outreachChannel === "facebook")
                         .filter((c) => {
                           const q = query.trim().toLowerCase();
                           return (
@@ -389,6 +425,11 @@ export default function MessengerPage() {
                             (c.contactName ?? "").toLowerCase().includes(q)
                           );
                         })
+                        .sort(
+                          (a, b) =>
+                            Number(b.outreachChannel === "facebook") -
+                            Number(a.outreachChannel === "facebook")
+                        )
                         .slice(0, MAX_SEARCH_RESULTS)
                     : [];
 
@@ -536,6 +577,11 @@ export default function MessengerPage() {
                                     }}
                                   >
                                     {c.businessName}
+                                    {c.outreachChannel && c.outreachChannel !== "facebook" && (
+                                      <span style={{ color: FAINT2, marginLeft: 6 }}>
+                                        · {c.outreachChannel.toUpperCase()}
+                                      </span>
+                                    )}
                                   </button>
                                 ))}
                               </div>
@@ -575,7 +621,11 @@ export default function MessengerPage() {
                   <div style={{ padding: "14px 20px", borderBottom: "1px solid #E4DBC8", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontFamily: grotesk, fontWeight: 600, fontSize: 16, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {thread.contact?.businessName ?? thread.conversation.displayName ?? "(unknown)"}
+                        {conversationTitle(
+                          thread.contact?.businessName,
+                          thread.conversation.displayName,
+                          thread.conversation.psid
+                        )}
                       </div>
                       {thread.contact ? (
                         <div style={{ marginTop: 4 }}>
