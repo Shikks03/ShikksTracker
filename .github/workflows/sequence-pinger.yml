@@ -1,0 +1,90 @@
+name: Sequence engine pinger
+
+# Vercel Hobby crons are daily-only, so the sequence engine has always needed an
+# external hourly pinger (CLAUDE.md, "Cron trigger"). It was never set up: as of
+# 2026-08-30 production reported engine.lastRunAt = 2026-08-01, i.e. the engine
+# had not run for 29 days, and no .github/ directory existed at all.
+#
+# WHAT ONE RUN DOES (src/lib/sequence.ts runSequenceEngine):
+#   0. sweep logs stuck in "sending"      — always
+#   A. check replies + takeover alerts    — always
+#   B. generate AI drafts                 — only if /settings draftGenerationEnabled
+#   C. send approved logs                 — only if /settings sendingEnabled
+# Both switches default to false and both were false when this was added, so
+# turning this pinger on cannot send mail on its own. It resumes reply
+# detection; drafting and sending stay behind the /settings toggles.
+
+on:
+  schedule:
+    # UTC. Asia/Manila is a fixed UTC+8 with no DST, so this is 08:05-18:05
+    # Manila — the engine's own 08:00-18:00 send window, plus a trailing run.
+    # sendApproved enforces that window itself, so the 18:05 run sweeps, checks
+    # replies and drafts but sends nothing; that last reply check is the point
+    # of including it. :05 rather than :00 because scheduled runs cluster on the
+    # hour across all of GitHub and get queued.
+    - cron: "5 0-10 * * *"
+  workflow_dispatch: # manual run — NOTE: a real engine run, not a dry run
+
+# A run that overruns its hour must not stack with the next one.
+concurrency:
+  group: sequence-pinger
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the sequence engine
+        env:
+          # Repo Settings -> Secrets and variables -> Actions -> New repository
+          # secret, named CRON_SECRET, holding the SAME 48-char value as the
+          # CRON_SECRET env var in Vercel. Never inline it in this file.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # Optional repo *variable* APP_BASE_URL; falls back to production.
+          BASE_URL: ${{ vars.APP_BASE_URL || 'https://shikkstracker.vercel.app' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::CRON_SECRET repository secret is not set."
+            echo "Add it under Settings -> Secrets and variables -> Actions."
+            echo "It must match the CRON_SECRET env var in Vercel exactly."
+            exit 1
+          fi
+
+          echo "Pinging ${BASE_URL}/api/cron/sequence"
+
+          # The secret goes in a HEADER, never the URL: query strings land in
+          # access logs and referrers.
+          #
+          # No --retry on purpose. A retry after a timeout would re-enter an
+          # engine run that may already be mid-send. The engine is protected by
+          # its atomic approved->"sending" claim and its stale-sending sweep, but
+          # the cheaper answer is to let the next hourly run catch up: nothing
+          # here is time-critical to the minute.
+          http_code=$(curl -sS -o response.json -w '%{http_code}' \
+            --max-time 120 \
+            -X POST \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            "${BASE_URL}/api/cron/sequence")
+
+          echo "HTTP ${http_code}"
+          echo "--- response ---"
+          cat response.json || true
+          echo
+
+          if [ "${http_code}" != "200" ]; then
+            case "${http_code}" in
+              401) echo "::error::401 — CRON_SECRET here does not match the one in Vercel." ;;
+              404) echo "::error::404 — route missing; is the deployment live?" ;;
+              500) echo "::error::500 — engine threw. Read the response body above." ;;
+              000) echo "::error::No response — request timed out or DNS failed." ;;
+              *)   echo "::error::Unexpected status ${http_code}." ;;
+            esac
+            exit 1
+          fi
+
+          echo "::notice::Engine run completed. Summary is in the response above."
