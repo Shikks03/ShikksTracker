@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, Button, MonoLabel } from "@/components/ui";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Panel, Button, MonoLabel, PipelineMarker } from "@/components/ui";
 import { serif, grotesk, mono, INK, FAINT, FAINT2, CLAY } from "@/components/tokens";
 import { ChannelBadge, TierBadge, ClaimedBadge } from "@/components/ChannelBadges";
 import { apiFetch } from "@/lib/client";
@@ -11,8 +12,16 @@ import { normalizeHandleUrl, telHref, type Channel } from "@/lib/channels";
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Mirrors the GET /api/outreach-logs contract (Phase 4, built in parallel;
 // defaults to both draft and approved logs — see resolveOutreachLogStatusFilter
-// in src/lib/outreachLogs.ts). The board only ever shows non-email channels —
-// email is fully automated and lives in the Review Queue instead.
+// in src/lib/outreachLogs.ts).
+//
+// P2 lane split (2026-08-30): this page now fetches only the instagram+phone
+// lane (`?channel=instagram,phone`, see OUTREACH_BOARD_CHANNELS in
+// src/lib/outreachLogs.ts). Facebook DMs moved to /messenger, which has the
+// conversation context a DM draft needs to be reviewable. This is a
+// DISPLAY-only narrowing — NON_EMAIL_CHANNELS still treats facebook as
+// non-email everywhere else (mark-sent, Gmail auto-send exclusion), so a
+// facebook log is still a perfectly valid non-email log, it just doesn't
+// render on this particular board any more.
 
 interface OutreachContact {
   _id: string;
@@ -30,11 +39,16 @@ interface OutreachContact {
   currentStage: number;
 }
 
+/** The channels this board renders, post lane-split. Facebook still exists as
+ *  a non-email channel elsewhere (see the module doc above) — it simply never
+ *  appears in a response this page's fetch can produce. */
+type BoardChannel = "instagram" | "phone";
+
 interface OutreachLogItem {
   _id: string;
   stage: 1 | 2 | 3;
   status: "draft" | "approved" | "sent";
-  channel: "facebook" | "instagram" | "phone";
+  channel: BoardChannel;
   subject: string;
   body: string;
   createdAt?: string;
@@ -43,21 +57,16 @@ interface OutreachLogItem {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
-/** Where the "contact" link on a task card should go, given the log's channel. */
+/** Where the "contact" link on a task row should go, given the log's channel. */
 function buildContactLink(
-  channel: "facebook" | "instagram" | "phone",
+  channel: BoardChannel,
   contact: OutreachContact
 ): { href: string; label: string; external: boolean } | null {
   if (channel === "phone") {
     if (!contact.phone) return null;
     return { href: telHref(contact.phone), label: contact.phone, external: false };
   }
-  if (channel === "facebook") {
-    if (!contact.facebook) return null;
-    return { href: normalizeHandleUrl(contact.facebook, "facebook"), label: "Open Facebook →", external: true };
-  }
-  if (channel === "instagram") {
-    if (!contact.instagram) return null;
+  if (contact.instagram) {
     return { href: normalizeHandleUrl(contact.instagram, "instagram"), label: "Open Instagram →", external: true };
   }
   return null;
@@ -69,6 +78,11 @@ export default function OutreachPage() {
   const [logs,    setLogs]    = useState<OutreachLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
+
+  /** One row expanded at a time — the body/key points only render once the
+   *  row is opened, which is most of the density win over the old always-open
+   *  cards. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Copy-to-clipboard feedback, per card, auto-clears after ~2s
   const [copiedIds,  setCopiedIds]  = useState<Set<string>>(new Set());
@@ -85,7 +99,12 @@ export default function OutreachPage() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await apiFetch<OutreachLogItem[]>("/api/outreach-logs");
+    // Narrowed to the instagram+phone lane — facebook lives in /messenger now.
+    // The no-param default on the API stays ALL non-email channels; this page
+    // is the one caller that deliberately narrows it.
+    const { data, error: err } = await apiFetch<OutreachLogItem[]>(
+      "/api/outreach-logs?channel=instagram,phone"
+    );
     setLoading(false);
     if (err) { setError(err); return; }
     setLogs(Array.isArray(data) ? data : []);
@@ -156,28 +175,54 @@ export default function OutreachPage() {
 
   const errText: React.CSSProperties = {
     fontFamily: mono,
-    fontSize: 10.5,
+    fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: "0.06em",
     color: CLAY,
     display: "block",
-    marginTop: 10,
+    marginTop: 6,
   };
 
   return (
-    <div className="page-enter" style={{ padding: "34px 42px 56px", minHeight: "100%" }}>
+    <div className="page-enter" style={{ padding: "30px 42px 48px", minHeight: "100%" }}>
 
       {/* Header */}
-      <MonoLabel style={{ fontSize: 11, letterSpacing: "0.14em", color: FAINT, display: "block", marginBottom: 10 }}>
-        {logs.length} PENDING TASK{logs.length === 1 ? "" : "S"}
-      </MonoLabel>
-      <h1 style={{ fontFamily: serif, fontSize: 40, fontWeight: 400, color: INK, letterSpacing: "-0.01em", margin: "0 0 28px", lineHeight: 1.1 }}>
-        Outreach Tasks
-      </h1>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+        <div>
+          <MonoLabel style={{ fontSize: 11, letterSpacing: "0.14em", color: FAINT, display: "block", marginBottom: 8 }}>
+            {logs.length} PENDING TASK{logs.length === 1 ? "" : "S"}
+          </MonoLabel>
+          <h1 style={{ fontFamily: serif, fontSize: 36, fontWeight: 400, color: INK, letterSpacing: "-0.01em", margin: 0, lineHeight: 1.1 }}>
+            Outreach Tasks
+          </h1>
+        </div>
+
+        {/* Facebook moved to /messenger (P2 lane split) — called out here so
+            the narrower board reads as intentional, not data loss. */}
+        <a
+          href="/messenger"
+          style={{
+            fontFamily: mono,
+            fontSize: 10.5,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: FAINT,
+            border: "1px solid #D8CFBB",
+            borderRadius: 6,
+            padding: "7px 12px",
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+            marginTop: 4,
+            flexShrink: 0,
+          }}
+        >
+          Facebook DMs now live in Messenger →
+        </a>
+      </div>
 
       {/* Loading */}
       {loading && (
-        <div style={{ textAlign: "center", padding: "80px 0" }}>
+        <div style={{ textAlign: "center", padding: "60px 0" }}>
           <MonoLabel style={{ fontSize: 12, letterSpacing: "0.14em", color: FAINT, display: "block" }}>
             LOADING…
           </MonoLabel>
@@ -186,133 +231,178 @@ export default function OutreachPage() {
 
       {/* Error */}
       {!loading && error && (
-        <Panel style={{ padding: "22px 28px" }}>
+        <Panel style={{ padding: "16px 22px", marginTop: 20 }}>
           <MonoLabel style={{ color: CLAY, textTransform: "uppercase" }}>{error}</MonoLabel>
         </Panel>
       )}
 
       {/* Empty */}
       {!loading && !error && logs.length === 0 && (
-        <div style={{ textAlign: "center", padding: "80px 0" }}>
+        <div style={{ textAlign: "center", padding: "60px 0" }}>
           <MonoLabel style={{ fontSize: 12, letterSpacing: "0.14em", color: FAINT, display: "block" }}>
             NO PENDING OUTREACH TASKS
           </MonoLabel>
-          <MonoLabel style={{ fontSize: 10.5, color: FAINT2, display: "block", marginTop: 10 }}>
-            FACEBOOK, INSTAGRAM AND PHONE TOUCHES SHOW UP HERE ONCE THE SEQUENCE ENGINE DRAFTS THEM
+          <MonoLabel style={{ fontSize: 10.5, color: FAINT2, display: "block", marginTop: 8 }}>
+            INSTAGRAM AND PHONE TOUCHES SHOW UP HERE ONCE THE SEQUENCE ENGINE DRAFTS THEM
           </MonoLabel>
         </div>
       )}
 
-      {/* Task list */}
+      {/* Task list — one Panel, dense hairline-divided rows, expand-on-click
+          for the AI-drafted body (matches the /review approved-queue pattern). */}
       {!loading && !error && logs.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {logs.map((log) => {
-            const { contact } = log;
-            const contactLink = buildContactLink(log.channel, contact);
-            const copied  = copiedIds.has(log._id);
-            const marking = markingIds.has(log._id);
-            const copyErr = copyErrors[log._id];
-            const markErr = markErrors[log._id];
+        <div style={{ marginTop: 22 }}>
+          <Panel style={{ padding: 0, overflow: "hidden" }}>
+            {logs.map((log, idx) => {
+              const { contact } = log;
+              const contactLink = buildContactLink(log.channel, contact);
+              const copied  = copiedIds.has(log._id);
+              const marking = markingIds.has(log._id);
+              const copyErr = copyErrors[log._id];
+              const markErr = markErrors[log._id];
+              const expanded = expandedId === log._id;
 
-            return (
-              <Panel key={log._id} style={{ padding: "24px 28px" }}>
+              return (
+                <div key={log._id}>
+                  {idx > 0 && <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />}
 
-                {/* Top row: business name + badges  ·  contact link */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: serif, fontSize: 22, color: INK, letterSpacing: "-0.01em", lineHeight: 1.2 }}>
-                      {contact.businessName}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
-                      <ChannelBadge channel={log.channel} />
-                      <MonoLabel style={{ fontSize: 10.5, letterSpacing: "0.06em" }}>
-                        STAGE {log.stage} OF 3
-                      </MonoLabel>
-                      {contact.webPresenceTier && <TierBadge tier={contact.webPresenceTier} />}
-                      {contact.claimed && <ClaimedBadge claimed={contact.claimed} />}
-                    </div>
-                  </div>
-
-                  {contactLink && (
-                    <a
-                      href={contactLink.href}
-                      target={contactLink.external ? "_blank" : undefined}
-                      rel={contactLink.external ? "noopener noreferrer" : undefined}
-                      style={{
-                        fontFamily: mono,
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        color: INK,
-                        border: "1px solid #C9BEA6",
-                        borderRadius: 6,
-                        padding: "7px 14px",
-                        textDecoration: "none",
-                        whiteSpace: "nowrap",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {contactLink.label}
-                    </a>
-                  )}
-                </div>
-
-                {/* Key points */}
-                {contact.keyPoints && (
+                  {/* Collapsed row */}
                   <div
+                    className="row-hover"
+                    onClick={() => setExpandedId(expanded ? null : log._id)}
                     style={{
-                      marginTop: 16,
-                      padding: "12px 18px",
-                      borderLeft: "2px solid #C68A1E",
-                      backgroundColor: "#F6F1E2",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "12px 20px",
+                      cursor: "pointer",
                     }}
                   >
-                    <span style={{ fontFamily: mono, fontSize: 10.5, color: "#96712A", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      KEY POINTS →{" "}
+                    <span style={{ display: "inline-flex", color: FAINT2, flexShrink: 0 }}>
+                      {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     </span>
-                    <span style={{ fontFamily: mono, fontSize: 11.5, color: "#7A6E52" }}>
-                      {contact.keyPoints}
-                    </span>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            fontFamily: grotesk,
+                            fontWeight: 600,
+                            fontSize: 15,
+                            color: INK,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {contact.businessName}
+                        </span>
+                        <ChannelBadge channel={log.channel} />
+                        <MonoLabel style={{ fontSize: 10, letterSpacing: "0.06em" }}>
+                          STAGE {log.stage}/3
+                        </MonoLabel>
+                        {contact.webPresenceTier && <TierBadge tier={contact.webPresenceTier} />}
+                        {contact.claimed && <ClaimedBadge claimed={contact.claimed} />}
+                      </div>
+                    </div>
+
+                    <PipelineMarker stage={contact.pipelineStage} />
+
+                    {contactLink && (
+                      <a
+                        href={contactLink.href}
+                        target={contactLink.external ? "_blank" : undefined}
+                        rel={contactLink.external ? "noopener noreferrer" : undefined}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 10.5,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          color: INK,
+                          border: "1px solid #C9BEA6",
+                          borderRadius: 6,
+                          padding: "5px 10px",
+                          textDecoration: "none",
+                          whiteSpace: "nowrap",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {contactLink.label}
+                      </a>
+                    )}
+
+                    <Button
+                      variant="primary"
+                      disabled={marking}
+                      onClick={(e) => { e.stopPropagation(); handleMarkSent(log); }}
+                      style={{ padding: "6px 14px", fontSize: 12.5, flexShrink: 0 }}
+                    >
+                      {marking ? "Marking…" : "Mark sent"}
+                    </Button>
                   </div>
-                )}
 
-                {/* AI-drafted message body */}
-                <div
-                  style={{
-                    marginTop: 16,
-                    fontFamily: grotesk,
-                    fontSize: 15.5,
-                    lineHeight: 1.7,
-                    color: "#2A251C",
-                    whiteSpace: "pre-wrap",
-                    backgroundColor: "#FCFAF3",
-                    border: "1px solid #E4DBC8",
-                    borderRadius: 8,
-                    padding: "16px 20px",
-                  }}
-                >
-                  {log.body}
+                  {markErr && !expanded && (
+                    <div style={{ padding: "0 20px 10px 47px" }}>
+                      <span style={errText}>{markErr}</span>
+                    </div>
+                  )}
+
+                  {/* Expanded: key points + AI-drafted body + copy */}
+                  {expanded && (
+                    <div style={{ padding: "0 20px 16px 47px", backgroundColor: "#F4F0E6" }}>
+                      {contact.keyPoints && (
+                        <div
+                          style={{
+                            marginBottom: 10,
+                            padding: "9px 14px",
+                            borderLeft: "2px solid #C68A1E",
+                            backgroundColor: "#F6F1E2",
+                          }}
+                        >
+                          <span style={{ fontFamily: mono, fontSize: 10, color: "#96712A", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                            KEY POINTS →{" "}
+                          </span>
+                          <span style={{ fontFamily: mono, fontSize: 11, color: "#7A6E52" }}>
+                            {contact.keyPoints}
+                          </span>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          fontFamily: grotesk,
+                          fontSize: 14.5,
+                          lineHeight: 1.65,
+                          color: "#2A251C",
+                          whiteSpace: "pre-wrap",
+                          backgroundColor: "#FCFAF3",
+                          border: "1px solid #E4DBC8",
+                          borderRadius: 8,
+                          padding: "12px 16px",
+                        }}
+                      >
+                        {log.body}
+                      </div>
+
+                      {copyErr && <span style={errText}>{copyErr}</span>}
+                      {markErr && <span style={errText}>{markErr}</span>}
+
+                      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                        <Button
+                          variant="outline"
+                          onClick={(e) => { e.stopPropagation(); handleCopy(log); }}
+                          style={{ padding: "7px 14px", fontSize: 13 }}
+                        >
+                          {copied ? "Copied" : "Copy message"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-
-                {copyErr && <span style={errText}>{copyErr}</span>}
-                {markErr && <span style={errText}>{markErr}</span>}
-
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 14, marginTop: 18 }}>
-                  <Button variant="outline" onClick={() => handleCopy(log)}>
-                    {copied ? "Copied" : "Copy message"}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    disabled={marking}
-                    onClick={() => handleMarkSent(log)}
-                  >
-                    {marking ? "Marking…" : "Mark sent"}
-                  </Button>
-                </div>
-              </Panel>
-            );
-          })}
+              );
+            })}
+          </Panel>
         </div>
       )}
     </div>

@@ -31,8 +31,12 @@ export const dynamic = "force-dynamic";
  *              board must show both or a composed-and-approved social
  *              message would never appear. Supplying `?status=` explicitly
  *              still matches that single status exactly, unchanged.
- *   channel    optional — one of facebook/instagram/phone (narrows further
- *              than the baseline non-email filter)
+ *   channel    optional — one or more of facebook/instagram/phone, comma-
+ *              separated (e.g. "instagram,phone"), narrowing further than the
+ *              baseline non-email filter. The no-param default stays ALL
+ *              non-email channels — only the /outreach page (which now shows
+ *              just the instagram+phone lane; facebook moved to /messenger)
+ *              passes a narrowed value. Other callers rely on the default.
  *   campaignId optional — scope to one campaign
  *
  * Never returns email-channel logs, including legacy logs written before the
@@ -58,19 +62,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: statusResult.error }, { status: statusResult.httpStatus });
     }
 
-    if (channel && !isNonEmailChannel(channel)) {
+    // Comma-separated so one request can scope to a lane ("instagram,phone")
+    // instead of the page firing one fetch per channel and merging client-side.
+    const channels = channel ? channel.split(",").map((c) => c.trim()).filter(Boolean) : [];
+    const invalid = channels.find((c) => !isNonEmailChannel(c));
+    if (invalid) {
       return NextResponse.json(
-        { error: `Invalid channel: ${channel}. Must be one of: facebook, instagram, phone.` },
+        { error: `Invalid channel: ${invalid}. Must be one of: facebook, instagram, phone.` },
         { status: 400 }
       );
     }
 
     const filter: Record<string, unknown> = { ...statusResult.filter };
-    // A specific channel narrows the match to exactly that value; otherwise
-    // fall back to the baseline "any non-email channel" predicate. Both
-    // branches exclude email (and legacy channel-less) logs.
-    if (channel) {
-      filter.channel = channel;
+    // A specific channel selection narrows the match to exactly those values;
+    // otherwise fall back to the baseline "any non-email channel" predicate
+    // (the no-param default other callers rely on). All branches exclude
+    // email (and legacy channel-less) logs.
+    if (channels.length === 1) {
+      filter.channel = channels[0];
+    } else if (channels.length > 1) {
+      filter.channel = { $in: channels };
     } else {
       Object.assign(filter, NON_EMAIL_CHANNEL_QUERY);
     }

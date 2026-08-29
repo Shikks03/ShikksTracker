@@ -27,6 +27,25 @@ export const NON_EMAIL_CHANNEL_QUERY: { channel: { $in: readonly NonEmailChannel
   channel: { $in: NON_EMAIL_CHANNELS },
 };
 
+/**
+ * Channels the /outreach board shows, as of P2's lane split (2026-08-30).
+ *
+ * Facebook moved to /messenger, which has the conversation context that makes a
+ * DM draft reviewable. This is a DISPLAY subset and nothing more.
+ *
+ * It is deliberately NOT a narrowing of NON_EMAIL_CHANNELS. That constant
+ * defines "not an email log" and gates checkMarkSentAllowed and (inversely)
+ * Gmail auto-send. Facebook logs are still non-email logs, still hand-sent,
+ * still marked sent through the same route — they are just rendered somewhere
+ * else. Removing facebook from NON_EMAIL_CHANNELS would 400 every facebook
+ * Mark sent in /messenger.
+ */
+export const OUTREACH_BOARD_CHANNELS = ["instagram", "phone"] as const;
+
+export const OUTREACH_BOARD_CHANNEL_QUERY: {
+  channel: { $in: readonly NonEmailChannel[] };
+} = { channel: { $in: OUTREACH_BOARD_CHANNELS } };
+
 /** Statuses the outreach-logs list endpoint accepts via `?status=`. */
 export const VALID_OUTREACH_LOG_STATUSES = new Set(["draft", "approved", "sending", "sent"]);
 
