@@ -8,6 +8,7 @@ import {
   FOREST_ACTION as FOREST,
 } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
+import { toastError, toastSuccess } from "@/lib/toast";
 import { previewCsv, CsvPreviewResult } from "@/lib/previewCsv";
 import { parseScraperCsv, deriveChannel, NonEmailChannel } from "@/lib/scraperCsv";
 
@@ -126,10 +127,13 @@ export default function ImportPage() {
       formData.append("campaignId", campaignId);
       if (opts?.format) formData.append("format", opts.format);
       if (opts?.defaultChannel) formData.append("defaultChannel", opts.defaultChannel);
+      // Raw fetch (multipart), so it bypasses apiFetch's automatic toast.
       const res = await fetch("/api/contacts/import", { method: "POST", body: formData });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setUploadError(body.error ?? `HTTP ${res.status}`);
+        const msg = body.error ?? `HTTP ${res.status}`;
+        setUploadError(msg);
+        toastError(`${msg} — nothing was imported.`, "IMPORT FAILED");
         return;
       }
       const data = (await res.json()) as ImportApiResult;
@@ -156,8 +160,16 @@ export default function ImportPage() {
         setPendingFile(null);
         setPreview(null);
       }
+      toastSuccess(
+        `${li.inserted} contact${li.inserted === 1 ? "" : "s"} imported from ${file.name}${
+          li.totalRows - li.inserted > 0 ? ` · ${li.totalRows - li.inserted} skipped` : ""
+        }.`,
+        "IMPORTED"
+      );
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(msg);
+      toastError(`${msg} — nothing was imported.`, "IMPORT FAILED");
     } finally {
       setUploading(false);
       if (activeRef.current) activeRef.current.value = "";
@@ -258,14 +270,19 @@ export default function ImportPage() {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) {
-        setManualError(data.error ?? `HTTP ${res.status}`);
+        const msg = data.error ?? `HTTP ${res.status}`;
+        setManualError(msg);
+        toastError(msg, "CONTACT NOT ADDED");
       } else {
         setManualSuccess(true);
+        toastSuccess(`${businessName} added.`, "CONTACT ADDED");
         setBusinessName(""); setContactEmail(""); setContactName("");
         setKeyPoints(""); setLeadSource("cold_email");
       }
     } catch (err) {
-      setManualError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setManualError(msg);
+      toastError(msg, "CONTACT NOT ADDED");
     } finally {
       setManualLoading(false);
     }

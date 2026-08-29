@@ -6,6 +6,7 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import ToastHost from "@/components/ToastHost";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
@@ -48,6 +49,8 @@ export default function RootLayout({
         <main className="flex-1 overflow-y-auto bg-paper">
           {children}
         </main>
+        {/* Fixed overlay — every page and apiFetch report failures here. */}
+        <ToastHost />
       </body>
     </html>
   );

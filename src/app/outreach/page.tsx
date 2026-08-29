@@ -5,6 +5,7 @@ import { Panel, Button, MonoLabel } from "@/components/ui";
 import { serif, grotesk, mono, INK, FAINT, FAINT2, CLAY } from "@/components/tokens";
 import { ChannelBadge, TierBadge, ClaimedBadge } from "@/components/ChannelBadges";
 import { apiFetch } from "@/lib/client";
+import { toastSuccess } from "@/lib/toast";
 import { normalizeHandleUrl, telHref, type Channel } from "@/lib/channels";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -147,6 +148,10 @@ export default function OutreachPage() {
     }
     // Optimistic removal — the log is now "sent" server-side
     setLogs((prev) => prev.filter((l) => l._id !== log._id));
+    toastSuccess(
+      `${log.contact?.businessName ?? "Contact"} marked as sent.`,
+      "LOGGED"
+    );
   }
 
   const errText: React.CSSProperties = {

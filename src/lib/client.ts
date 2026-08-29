@@ -9,15 +9,32 @@
  * No secrets here — safe to import into client components.
  */
 
+import { toastError } from "./toast";
+
+export interface ApiFetchOptions {
+  /**
+   * Suppress the automatic error toast. For polling/background reads where a
+   * failure is not something the user needs to act on. Inline error states
+   * should NOT set this — a duplicate is better than a silent failure.
+   */
+  silent?: boolean;
+}
+
 /**
  * Fetch JSON and return `{ data, error }` instead of throwing, so callers can
  * render an error state rather than swallow the failure. On a non-2xx response
  * it reads a `{ error }` body when present, else falls back to `HTTP <status>`.
+ *
+ * Every failure also raises a toast (see src/lib/toast.ts). This is the one
+ * choke point all pages already go through, so surfacing it here means no page
+ * can fail invisibly just because its author forgot to render `error`.
  */
 export async function apiFetch<T>(
   url: string,
-  options?: RequestInit
+  options?: RequestInit,
+  opts?: ApiFetchOptions
 ): Promise<{ data: T | null; error: string | null }> {
+  const method = (options?.method ?? "GET").toUpperCase();
   try {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
@@ -25,11 +42,26 @@ export async function apiFetch<T>(
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return { data: null, error: body.error ?? `HTTP ${res.status}` };
+      let error = body.error ?? `HTTP ${res.status}`;
+      // A 401 mid-session means the cookie expired or SESSION_SECRET rotated;
+      // "Unauthorized" alone reads like a permissions bug rather than "log in".
+      if (res.status === 401) error = `${error} — your session expired, sign in again.`;
+      if (!opts?.silent) {
+        toastError(error, method === "GET" ? "COULDN'T LOAD" : "ACTION FAILED");
+      }
+      return { data: null, error };
     }
     return { data: (await res.json()) as T, error: null };
   } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : String(err) };
+    // Network-level failure: server down, DNS, offline, request blocked.
+    const error = err instanceof Error ? err.message : String(err);
+    if (!opts?.silent) {
+      toastError(
+        `${error} — the request never reached the server.`,
+        method === "GET" ? "COULDN'T LOAD" : "ACTION FAILED"
+      );
+    }
+    return { data: null, error };
   }
 }
 

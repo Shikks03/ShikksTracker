@@ -23,6 +23,7 @@ import {
 } from "@/components/tokens";
 import { displayIdentity } from "@/lib/channels";
 import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
+import { toastError } from "@/lib/toast";
 
 // Send window hours (Manila) — must match sequence.ts
 const SEND_WINDOW_START = 8;
@@ -450,12 +451,16 @@ export default function Dashboard() {
       const res = await fetch(`/api/contacts?${p.toString()}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
-        setError(body.error ?? `HTTP ${res.status}`);
+        const msg = body.error ?? `HTTP ${res.status}`;
+        setError(msg);
+        toastError(msg, "COULDN'T LOAD");
         return;
       }
       setContacts(await res.json() as ContactRow[]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      toastError(`${msg} — the request never reached the server.`, "COULDN'T LOAD");
     } finally {
       setLoading(false);
     }

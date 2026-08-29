@@ -17,6 +17,7 @@ import {
   FOREST_ACTION as FOREST,
 } from "@/components/tokens";
 import { apiFetch, HOT_THRESHOLD } from "@/lib/client";
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -246,17 +247,26 @@ export default function ReviewPage() {
 
         if (res.status === 429) {
           const data = await res.json().catch(() => ({}));
-          setGlobalError(
-            `Daily send cap reached (${(data as { cap?: number }).cap ?? 15}/day). ${accumulated.length > 0 ? "Earlier sends completed — see results below." : "No emails were sent."}`
-          );
+          const msg = `Daily send cap reached (${(data as { cap?: number }).cap ?? 15}/day). ${accumulated.length > 0 ? "Earlier sends completed — see results below." : "No emails were sent."}`;
+          setGlobalError(msg);
+          toastInfo(msg, "SEND STOPPED");
           capHit = true;
           break;
         }
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          // Surface the error but keep accumulated results from earlier chunks
-          setGlobalError((data as { error?: string }).error ?? `HTTP ${res.status}`);
+          // Surface the error but keep accumulated results from earlier chunks.
+          // The banner sits at the top of the page and the Send button is at
+          // the bottom, so the toast is what the user actually sees.
+          const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
+          setGlobalError(msg);
+          toastError(
+            res.status === 403
+              ? `${msg} (HTTP 403) — the browser origin does not match APP_BASE_URL, so the server rejected the send.`
+              : `${msg} (HTTP ${res.status})`,
+            "SEND FAILED"
+          );
           break;
         }
 
@@ -274,10 +284,31 @@ export default function ReviewPage() {
         }
       }
     } catch (err) {
-      setGlobalError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setGlobalError(msg);
+      toastError(`${msg} — the request never reached the server.`, "SEND FAILED");
     } finally {
       setSending(false);
       setSendProgress(null);
+
+      // Per-log outcomes come back inside a 200 response, so a "successful"
+      // request can still mean nothing was sent. Report what actually happened.
+      const sentCount   = accumulated.filter((r) => r.status === "sent").length;
+      const failedCount = accumulated.filter((r) => r.status === "failed").length;
+      if (sentCount > 0) {
+        toastSuccess(
+          `${sentCount} email${sentCount === 1 ? "" : "s"} sent${failedCount > 0 ? `, ${failedCount} failed` : ""}.`,
+          "SENT"
+        );
+      }
+      if (failedCount > 0) {
+        const firstError = accumulated.find((r) => r.status === "failed" && r.error)?.error;
+        toastError(
+          `${failedCount} send${failedCount === 1 ? "" : "s"} failed${firstError ? `: ${firstError}` : " — see the results list."}`,
+          "SEND FAILED"
+        );
+      }
+
       await loadAll();
     }
   }

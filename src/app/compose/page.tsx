@@ -8,6 +8,7 @@ import {
   FOREST_ACTION as FOREST,
 } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
+import { toastError, toastSuccess } from "@/lib/toast";
 import { isSubjectRequiredForChannels } from "@/lib/outreachLogs";
 
 interface CampaignItem {
@@ -206,12 +207,18 @@ export default function ComposePage() {
 
       const data = (await res.json()) as BatchResult;
       setResult(data);
+      toastSuccess(
+        `${data.created} message${data.created === 1 ? "" : "s"} queued as approved.`,
+        "COMPOSED"
+      );
       // Clear the form so it can't be accidentally re-sent; keep campaign + result.
       setCheckedIds(new Set());
       setSubject("");
       setBody("");
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setApiError(msg);
+      toastError(msg, "COMPOSE FAILED");
     } finally {
       setSubmitting(false);
     }
