@@ -69,7 +69,7 @@ export default function SuppressionsPage() {
 
   async function handleDelete(id: string, email: string) {
     const confirmed = window.confirm(
-      `Remove ${email} from the suppression list? They become contactable again.`
+      `Unblock ${email}? They become contactable again.`
     );
     if (!confirmed) return;
     const { error: err } = await apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
@@ -122,7 +122,7 @@ export default function SuppressionsPage() {
               lineHeight: 1.1,
             }}
           >
-            Suppression List
+            Blocked
           </h1>
         </div>
 
@@ -265,7 +265,7 @@ export default function SuppressionsPage() {
                     color: FAINT,
                   }}
                 >
-                  NO SUPPRESSED EMAILS
+                  NO BLOCKED EMAILS
                 </span>
               </div>
             )}
@@ -359,7 +359,7 @@ export default function SuppressionsPage() {
                   color: FAINT,
                 }}
               >
-                {suppressions.length} SUPPRESSED · CHECKED ON EVERY IMPORT AND BEFORE EVERY SEND
+                {suppressions.length} BLOCKED · CHECKED ON EVERY IMPORT AND BEFORE EVERY SEND
               </span>
             </div>
           </Panel>

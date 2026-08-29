@@ -299,7 +299,8 @@ export default function ImportPage() {
 
   const STAT_TILES = [
     { key: "inserted"   as const, label: "INSERTED",   bg: "#EAF2E7", border: "#C6D8C0", color: "#1C6E3A" },
-    { key: "suppressed" as const, label: "SUPPRESSED",  bg: "#F7E8E2", border: "#E0C4B8", color: "#A23B28" },
+    // Label only — the key still matches the API's `skipped.suppressed`.
+    { key: "suppressed" as const, label: "BLOCKED",     bg: "#F7E8E2", border: "#E0C4B8", color: "#A23B28" },
     { key: "duplicates" as const, label: "DUPLICATES",  bg: "#F7EFD9", border: "#E2D3A8", color: "#96712A" },
     { key: "invalid"    as const, label: "INVALID",     bg: "#EFEBE0", border: "#D8CFBB", color: "#7A7263" },
   ] as const;
@@ -338,7 +339,7 @@ export default function ImportPage() {
           marginTop: 14,
         }}
       >
-        SUPPRESSED EMAILS ARE ALWAYS SKIPPED
+        BLOCKED EMAILS ARE ALWAYS SKIPPED
       </div>
 
       {/* Campaign select */}

@@ -13,7 +13,9 @@ const NAV_ITEMS = [
   { index: "03", label: "Outreach",     href: "/outreach",    showBadge: false },
   { index: "04", label: "Campaigns",    href: "/campaigns",   showBadge: false },
   { index: "05", label: "Import",       href: "/import",      showBadge: false },
-  { index: "06", label: "Suppressions", href: "/suppressions",showBadge: false },
+  // "Blocked" is the user-facing name for the suppression list; the route,
+  // API and Suppression model keep the domain term.
+  { index: "06", label: "Blocked",      href: "/suppressions",showBadge: false },
   { index: "07", label: "Compose",      href: "/compose",     showBadge: false },
   { index: "08", label: "Templates",    href: "/templates",   showBadge: false },
   { index: "09", label: "Settings",     href: "/settings",    showBadge: false },
