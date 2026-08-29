@@ -10,6 +10,7 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import { useNextSendCountdown } from "@/components/useNextSendCountdown";
+import { useSendingEnabled } from "@/components/useSendingEnabled";
 import {
   serif, grotesk, mono, INK, FAINT, FAINT2, CLAY, AMBER_TEXT,
   AMBER as AMBER_BORDER,
@@ -58,7 +59,11 @@ function ordinalStage(stage: 1 | 2 | 3): string {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ReviewPage() {
-  const countdown = useNextSendCountdown();
+  // "SENDS IN …" refers to the cron send slot only — manual sends from this
+  // page are unaffected by the switch, but the countdown is dropped when cron
+  // sending is off because nothing will go out on that schedule.
+  const showCountdown = useSendingEnabled() === true;
+  const countdown = useNextSendCountdown(showCountdown);
 
   const [drafts,      setDrafts]      = useState<EmailLogItem[]>([]);
   const [approved,    setApproved]    = useState<EmailLogItem[]>([]);
@@ -369,6 +374,16 @@ export default function ReviewPage() {
 
   const upNextCount = Math.max(0, drafts.length - 1 - currentIdx);
 
+  // Header kicker: position within the queue, plus the cron countdown when it
+  // applies. With neither (no drafts and sending off) the label is dropped
+  // entirely rather than rendered empty.
+  const kicker = [
+    drafts.length > 0 ? `DRAFT ${currentIdx + 1} / ${drafts.length}` : null,
+    showCountdown ? `SENDS IN ${countdown}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -384,19 +399,19 @@ export default function ReviewPage() {
       >
         {/* Left: kicker + H1 */}
         <div>
-          <MonoLabel
-            style={{
-              fontSize: 11,
-              letterSpacing: "0.14em",
-              color: FAINT,
-              display: "block",
-              marginBottom: 10,
-            }}
-          >
-            {drafts.length > 0
-              ? `DRAFT ${currentIdx + 1} / ${drafts.length} · SENDS IN ${countdown}`
-              : `SENDS IN ${countdown}`}
-          </MonoLabel>
+          {kicker && (
+            <MonoLabel
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.14em",
+                color: FAINT,
+                display: "block",
+                marginBottom: 10,
+              }}
+            >
+              {kicker}
+            </MonoLabel>
+          )}
           <h1
             style={{
               fontFamily: serif,

@@ -16,6 +16,7 @@ import {
   panelShadow,
 } from "@/components/ui";
 import { useNextSendCountdown } from "@/components/useNextSendCountdown";
+import { useSendingEnabled } from "@/components/useSendingEnabled";
 import {
   serif, grotesk, mono, INK, FAINT, FAINT2, CLAY,
   AMBER, AMBER_TEXT, HOT_TEXT, GREEN_SENT, HOT_BG,
@@ -377,7 +378,9 @@ function GroupPanel({
 
 export default function Dashboard() {
   const router    = useRouter();
-  const countdown = useNextSendCountdown();
+  // Countdown is only meaningful while cron sending is ON in /settings.
+  const showCountdown = useSendingEnabled() === true;
+  const countdown = useNextSendCountdown(showCountdown);
   const repliedRef = useRef<HTMLDivElement>(null);
 
   const [campaigns,     setCampaigns]     = useState<Campaign[]>([]);
@@ -693,9 +696,11 @@ export default function Dashboard() {
             >
               Drafts to approve
             </div>
-            <MonoLabel style={{ color: FAINT, display: "block", marginTop: 3 }}>
-              BEFORE NEXT SEND · {countdown}
-            </MonoLabel>
+            {showCountdown && (
+              <MonoLabel style={{ color: FAINT, display: "block", marginTop: 3 }}>
+                BEFORE NEXT SEND · {countdown}
+              </MonoLabel>
+            )}
           </div>
           <span
             style={{

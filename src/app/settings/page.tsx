@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Panel, Button } from "@/components/ui";
 import { serif, grotesk, mono, INK, FAINT, CLAY } from "@/components/tokens";
 import { apiFetch } from "@/lib/client";
+import { emitSettingsChanged } from "@/components/useSendingEnabled";
 
 interface Settings {
   draftGenerationEnabled: boolean;
@@ -88,6 +89,9 @@ export default function SettingsPage() {
       return;
     }
     setSettings(data);
+    // Tell already-mounted consumers (the persistent sidebar's NEXT SEND
+    // countdown) so they don't keep showing stale state until a reload.
+    if (data) emitSettingsChanged(data);
   }
 
   const anyPending = pendingField !== null;

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 import { useNextSendCountdown } from "./useNextSendCountdown";
+import { useSendingEnabled } from "./useSendingEnabled";
 
 const NAV_ITEMS = [
   { index: "01", label: "Dashboard",    href: "/",            showBadge: false },
@@ -25,7 +26,12 @@ const mono    = "var(--font-jetbrains)";
 
 export default function Sidebar() {
   const pathname  = usePathname();
-  const countdown = useNextSendCountdown();
+  // No countdown when cron sending is off in /settings — nothing is scheduled,
+  // so a running timer would promise a send that never happens. Tri-state:
+  // null = not read yet, which renders neither the timer nor the off marker.
+  const sendingEnabled = useSendingEnabled();
+  const showCountdown = sendingEnabled === true;
+  const countdown = useNextSendCountdown(showCountdown);
   const [draftCount, setDraftCount] = useState<number>(0);
 
   // Fetch pending draft count on mount and whenever the route changes.
@@ -200,33 +206,71 @@ export default function Sidebar() {
           }}
         />
 
-        {/* NEXT SEND label */}
-        <div
-          style={{
-            fontFamily: mono,
-            fontSize: 10.5,
-            letterSpacing: "0.20em",
-            textTransform: "uppercase",
-            color: "#6E6653",
-            marginBottom: 7,
-          }}
-        >
-          NEXT SEND
-        </div>
+        {/* NEXT SEND label + live countdown. With cron sending switched off in
+            /settings there is nothing to count down to, so the timer is
+            replaced by a muted status line — the absence is stated, not
+            silent. `null` (settings not read yet) shows neither. */}
+        {showCountdown && (
+          <>
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 10.5,
+                letterSpacing: "0.20em",
+                textTransform: "uppercase",
+                color: "#6E6653",
+                marginBottom: 7,
+              }}
+            >
+              NEXT SEND
+            </div>
 
-        {/* Live countdown */}
-        <div
-          style={{
-            fontFamily: mono,
-            fontSize: 17,
-            fontWeight: 600,
-            color: "#F4EEDF",
-            marginBottom: 22,
-            letterSpacing: "0.04em",
-          }}
-        >
-          {countdown}
-        </div>
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 17,
+                fontWeight: 600,
+                color: "#F4EEDF",
+                marginBottom: 22,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {countdown}
+            </div>
+          </>
+        )}
+
+        {sendingEnabled === false && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 22,
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                backgroundColor: "#6E6653",
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 11,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                color: "#8B8371",
+              }}
+            >
+              SENDING OFF
+            </span>
+          </div>
+        )}
 
         {/* User chip */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

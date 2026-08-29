@@ -30,11 +30,19 @@ function getNextSendTarget(): number {
 /**
  * Reusable hook that returns a live "HH:MM:SS" countdown string targeting
  * the next send window slot. Returns "--:--:--" until mounted (SSR-safe).
+ *
+ * Pass `active: false` when the caller is not rendering the countdown — e.g.
+ * cron sending is switched off in /settings, so there is no next automated
+ * send to count down to. The 1 s interval is then never started, which keeps
+ * the whole subtree (sidebar, dashboard, review page) from re-rendering every
+ * second for a value nobody displays.
  */
-export function useNextSendCountdown(): string {
+export function useNextSendCountdown(active: boolean = true): string {
   const [display, setDisplay] = useState("--:--:--");
 
   useEffect(() => {
+    if (!active) return;
+
     function tick() {
       const target = getNextSendTarget();
       const diff = Math.max(0, target - Date.now());
@@ -51,7 +59,7 @@ export function useNextSendCountdown(): string {
     tick();
     const id = setInterval(tick, 1_000);
     return () => clearInterval(id);
-  }, []);
+  }, [active]);
 
   return display;
 }
