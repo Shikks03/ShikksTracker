@@ -14,8 +14,8 @@ import EmailLog from "@/models/EmailLog";
 import Suppression from "@/models/Suppression";
 import { getGmailClient, sendGmailMessage, getSenderAddress } from "@/lib/gmail";
 import { htmlEscape } from "@/lib/tracking";
-import { bumpEngagement, SCORE_REPLY } from "@/lib/scoring";
 import { suppressContact } from "@/lib/contacts";
+import { applyReplyEffects } from "@/lib/replyEffects";
 import type { Types } from "mongoose";
 
 // ---------------------------------------------------------------------------
@@ -570,29 +570,16 @@ export async function checkReplies(): Promise<RepliesResult> {
       } else {
         // --- Normal reply ---
 
-        // 1. Update contact
-        await Contact.findByIdAndUpdate(contact._id, {
-          status: "replied",
-          pipelineStage: "replied",
-          nextSendAt: null,
-        });
-
-        // 2. Mark last sent log as replied, storing stripped body + snippet
+        // Shared with the Messenger path — see src/lib/replyEffects.ts for why
+        // this is not duplicated. `replyClean` is computed here because the
+        // email path must strip quoted text first; Messenger has no quoting.
         const replyClean = stripQuotedText(bodyText).trim();
-        await EmailLog.findByIdAndUpdate(lastSentLog._id, {
-          replied: true,
+        await applyReplyEffects({
+          contactId: contact._id as Types.ObjectId,
+          channel: "email",
+          replyText: replyClean,
           repliedAt,
-          replyBody: replyClean ? truncateReplyBody(replyClean) : null,
-          replySnippet: makeSnippet(replyClean),
-        });
-
-        // 3. Bump engagement score
-        await bumpEngagement(contact._id as Types.ObjectId, SCORE_REPLY);
-
-        // 4. Delete pending draft/approved logs (sequence auto-stops)
-        await EmailLog.deleteMany({
-          contactId: contact._id,
-          status: { $in: ["draft", "approved"] },
+          anchorLogId: lastSentLog._id as Types.ObjectId,
         });
 
         result.replied++;
