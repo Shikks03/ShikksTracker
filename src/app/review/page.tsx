@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import {
   Button,
   HotChip,
@@ -76,6 +76,8 @@ export default function ReviewPage() {
   const SEND_BATCH_MAX = 5;
 
   const [checkedIds,   setCheckedIds]   = useState<Set<string>>(new Set());
+  /** Approved log whose full subject/body is expanded inline. One at a time. */
+  const [expandedApprovedId, setExpandedApprovedId] = useState<string | null>(null);
   const [sending,      setSending]      = useState(false);
   const [sendResults,  setSendResults]  = useState<
     { id: string; contactName: string; subject: string; status: "sent" | "failed" | "skipped"; error?: string }[]
@@ -134,6 +136,14 @@ export default function ReviewPage() {
       setCurrentIdx(drafts.length - 1);
     }
   }, [drafts.length, currentIdx]);
+
+  // Keep the highlighted item visible in the (now scrollable) rail — otherwise
+  // [J] can walk the cursor past the bottom of the list and out of sight.
+  // block:"nearest" is a no-op when it is already on screen.
+  const currentRailItemRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    currentRailItemRef.current?.scrollIntoView({ block: "nearest" });
+  }, [currentIdx]);
 
   // ── Actions ──────────────────────────────────────────────────────────────────
 
@@ -365,14 +375,9 @@ export default function ReviewPage() {
 
   const isHot = (currentContact?.engagementScore ?? 0) >= HOT_THRESHOLD;
 
-  // Up to 4 drafts after current
-  const upNextDrafts = drafts.slice(currentIdx + 1, currentIdx + 5);
-
   const safeDraftCount = drafts.filter(
     (d) => (contactMap[d.contactId]?.engagementScore ?? 0) < HOT_THRESHOLD
   ).length;
-
-  const upNextCount = Math.max(0, drafts.length - 1 - currentIdx);
 
   // Header kicker: position within the queue, plus the cron countdown when it
   // applies. With neither (no drafts and sending off) the label is dropped
@@ -830,7 +835,7 @@ export default function ReviewPage() {
             </div>
           </div>
 
-          {/* ── UP NEXT RAIL ── */}
+          {/* ── PENDING APPROVALS RAIL ── */}
           <div
             style={{
               width: 260,
@@ -848,97 +853,119 @@ export default function ReviewPage() {
                 color: FAINT,
               }}
             >
-              UP NEXT · {String(upNextCount).padStart(2, "0")}
+              PENDING APPROVALS · {String(drafts.length).padStart(2, "0")}
             </MonoLabel>
 
-            {/* Mini cards */}
-            {upNextDrafts.map((d, i) => {
-              const contact  = contactMap[d.contactId] ?? null;
-              const hot      = (contact?.engagementScore ?? 0) >= HOT_THRESHOLD;
-              const preview  = contact?.keyPoints
-                ? contact.keyPoints.toUpperCase()
-                : d.subject.toUpperCase();
-              const actualIdx = currentIdx + 1 + i;
+            {/* Every pending draft, not just the ones after the cursor — the
+                list stays put as you work through it and scrolls instead of
+                shrinking. The current draft is marked with a forest rail. */}
+            <div
+              style={{
+                maxHeight: "min(56vh, 560px)",
+                overflowY: "auto",
+                overflowX: "hidden",
+                paddingRight: 4,
+                marginTop: 2,
+              }}
+            >
+              {drafts.map((d, i) => {
+                const contact  = contactMap[d.contactId] ?? null;
+                const hot      = (contact?.engagementScore ?? 0) >= HOT_THRESHOLD;
+                const preview  = contact?.keyPoints
+                  ? contact.keyPoints.toUpperCase()
+                  : d.subject.toUpperCase();
+                const isCurrent = i === currentIdx;
 
-              return (
-                <Panel
-                  key={d._id}
-                  className="row-hover"
-                  style={{ padding: "14px 18px", marginTop: 14, cursor: "pointer" }}
-                  onClick={() => {
-                    setCurrentIdx(actualIdx);
-                    setEditMode(false);
-                    setRegenMode(false);
-                    setRegenFeedback("");
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <div
+                return (
+                  // Wrapper carries the ref — Panel is not a forwardRef component.
+                  <div key={d._id} ref={isCurrent ? currentRailItemRef : undefined}>
+                    <Panel
+                      className={isCurrent ? "" : "row-hover"}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
+                        padding: "14px 18px",
+                        marginTop: 12,
+                        cursor: "pointer",
+                        // Transparent on the inactive items so the accent bar
+                        // never changes a card's width as the cursor moves.
+                        borderLeft: `3px solid ${isCurrent ? FOREST : "transparent"}`,
+                        backgroundColor: isCurrent ? "#FDFBF3" : "#F8F5EC",
+                      }}
+                      onClick={() => {
+                        setCurrentIdx(i);
+                        setEditMode(false);
+                        setRegenMode(false);
+                        setRegenFeedback("");
                       }}
                     >
-                      <span
+                      <div
                         style={{
-                          fontFamily: grotesk,
-                          fontWeight: 600,
-                          fontSize: 14.5,
-                          color: INK,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontFamily: grotesk,
+                              fontWeight: 600,
+                              fontSize: 14.5,
+                              color: INK,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {contact?.businessName ?? "—"}
+                          </span>
+                          {hot && <HotChip />}
+                        </div>
+                        <span
+                          style={{
+                            fontFamily: mono,
+                            fontSize: 10,
+                            border: "1px solid #C9BEA6",
+                            color: FAINT2,
+                            borderRadius: 3,
+                            padding: "2px 6px",
+                            textTransform: "uppercase",
+                            flexShrink: 0,
+                            marginLeft: 6,
+                          }}
+                        >
+                          {ordinalStage(d.stage)}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          fontFamily: mono,
+                          fontSize: 10,
+                          color: FAINT2,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                          marginTop: 6,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {contact?.businessName ?? "—"}
-                      </span>
-                      {hot && <HotChip />}
-                    </div>
-                    <span
-                      style={{
-                        fontFamily: mono,
-                        fontSize: 10,
-                        border: "1px solid #C9BEA6",
-                        color: FAINT2,
-                        borderRadius: 3,
-                        padding: "2px 6px",
-                        textTransform: "uppercase",
-                        flexShrink: 0,
-                        marginLeft: 6,
-                      }}
-                    >
-                      {ordinalStage(d.stage)}
-                    </span>
+                        {preview}
+                      </div>
+                    </Panel>
                   </div>
-
-                  <div
-                    style={{
-                      fontFamily: mono,
-                      fontSize: 10,
-                      color: FAINT2,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      marginTop: 6,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {preview}
-                  </div>
-                </Panel>
-              );
-            })}
+                );
+              })}
+            </div>
 
             {/* Approve all safe drafts */}
             <div style={{ marginTop: 18 }}>
@@ -994,23 +1021,31 @@ export default function ReviewPage() {
                 {approved.map((log, idx) => {
                   const contact = contactMap[log.contactId] ?? null;
                   const checked = checkedIds.has(log._id);
+                  const expanded = expandedApprovedId === log._id;
                   return (
                     <div key={log._id}>
                       {idx > 0 && (
                         <div style={{ height: 1, backgroundColor: "#E4DBC8" }} />
                       )}
                       <div
+                        className="row-hover"
                         style={{
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
                           padding: "14px 22px",
+                          cursor: "pointer",
                         }}
+                        onClick={() =>
+                          setExpandedApprovedId(expanded ? null : log._id)
+                        }
                       >
-                        {/* Checkbox */}
+                        {/* Checkbox — stopPropagation so ticking it does not
+                            also expand/collapse the row. */}
                         <input
                           type="checkbox"
                           checked={checked}
+                          onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             const next = new Set(checkedIds);
                             if (e.target.checked) next.add(log._id);
@@ -1019,6 +1054,22 @@ export default function ReviewPage() {
                           }}
                           style={{ marginRight: 14, cursor: "pointer", flexShrink: 0, width: 15, height: 15, accentColor: FOREST }}
                         />
+
+                        {/* Expand caret */}
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            color: FAINT2,
+                            marginRight: 8,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {expanded ? (
+                            <ChevronDown size={13} />
+                          ) : (
+                            <ChevronRight size={13} />
+                          )}
+                        </span>
 
                         <div
                           style={{
@@ -1068,6 +1119,57 @@ export default function ReviewPage() {
                         </div>
                         <UnapproveButton onUnapprove={() => handleUnapprove(log._id)} />
                       </div>
+
+                      {/* Expanded: the email exactly as it is queued to send.
+                          Read-only — unapprove it to edit, which returns it to
+                          the draft queue above. */}
+                      {expanded && (
+                        <div
+                          style={{
+                            borderTop: "1px solid #E4DBC8",
+                            backgroundColor: "#F1EBDD",
+                            padding: "18px 22px 22px 51px",
+                          }}
+                        >
+                          <MonoLabel
+                            style={{
+                              fontSize: 10.5,
+                              color: FAINT2,
+                              letterSpacing: "0.06em",
+                              display: "block",
+                            }}
+                          >
+                            TO — {contact?.contactEmail ?? "—"}
+                          </MonoLabel>
+
+                          <div
+                            style={{
+                              fontFamily: serif,
+                              fontSize: 23,
+                              fontWeight: 400,
+                              color: INK,
+                              letterSpacing: "-0.01em",
+                              lineHeight: 1.25,
+                              marginTop: 8,
+                            }}
+                          >
+                            {log.subject}
+                          </div>
+
+                          <div
+                            style={{
+                              fontFamily: grotesk,
+                              fontSize: 15.5,
+                              lineHeight: 1.7,
+                              color: "#2A251C",
+                              whiteSpace: "pre-wrap",
+                              marginTop: 14,
+                            }}
+                          >
+                            {log.body}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1119,7 +1221,8 @@ function UnapproveButton({ onUnapprove }: { onUnapprove: () => void }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
-      onClick={onUnapprove}
+      // stopPropagation: the row itself toggles the expanded preview.
+      onClick={(e) => { e.stopPropagation(); onUnapprove(); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
