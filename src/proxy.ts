@@ -8,6 +8,7 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/session";
  *   /api/track/*       — recipient-facing pixel/click endpoints
  *   /api/cron/*        — guarded by x-cron-secret; leave that mechanism intact
  *   /api/os/*          — guarded by x-os-secret (RikuOS); see requireOsSecret
+ *   /api/webhooks/*    — guarded by X-Hub-Signature-256 (Meta); see signature.ts
  *   /api/health        — exact match
  *   /login             — exact match (the login page itself)
  *   /api/auth/login    — exact match (the login POST handler)
@@ -39,6 +40,12 @@ function isPublicPath(pathname: string): boolean {
     // handler calls requireOsSecret() as its first statement — the same
     // arrangement as /api/cron/* and x-cron-secret.
     pathname.startsWith("/api/os/") ||
+    // Meta posts here server-to-server with no session cookie. Session-exempt
+    // but NOT unguarded: every POST must carry a valid X-Hub-Signature-256
+    // (HMAC-SHA256 over the raw body under META_APP_SECRET) and the handler
+    // rejects anything else with 401 before touching the database. Same
+    // arrangement as /api/cron/* and /api/os/*.
+    pathname.startsWith("/api/webhooks/") ||
     pathname.startsWith("/_next/")
   ) {
     return true;
