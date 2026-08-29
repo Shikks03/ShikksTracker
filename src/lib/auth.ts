@@ -94,8 +94,17 @@ export async function requireSession(request: NextRequest): Promise<NextResponse
       const expected = (process.env.APP_BASE_URL || request.nextUrl.origin).replace(/\/+$/, "");
       const actual = origin.replace(/\/+$/, "");
       if (actual !== expected) {
+        // Outside production, name the mismatch. This fires constantly in local
+        // dev when the dev server lands on a different port than APP_BASE_URL
+        // (Next picks the next free one), and "Cross-origin request rejected"
+        // alone gives no hint that a port is the problem. Never in production:
+        // there it would echo config back to an unauthenticated-ish caller.
+        const detail =
+          process.env.NODE_ENV === "production"
+            ? ""
+            : `: request origin ${actual} does not match APP_BASE_URL ${expected}`;
         return NextResponse.json(
-          { error: "Cross-origin request rejected" },
+          { error: `Cross-origin request rejected${detail}` },
           { status: 403 }
         );
       }
