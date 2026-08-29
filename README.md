@@ -56,6 +56,33 @@ App is available at `http://localhost:3000`.
 
 ---
 
+## Deployment
+
+Full runbook in **`docs/deployment.md`**. One constraint worth stating up front, because it
+looks like a performance setting and is not:
+
+> ### ⚠️ The Vercel region in `vercel.json` must stay `sin1`
+>
+> **Anthropic refuses API requests originating from Hong Kong.** Pinned to `hkg1`, every
+> Claude call in `src/lib/draft.ts` fails in production with
+> `403 {"error":{"type":"forbidden","message":"Request not allowed"}}` — draft generation,
+> draft regeneration and AI template generation all die. It works locally, because a laptop
+> in Manila reaches the API fine, so it surfaces only on the deployed site.
+>
+> A 403 `forbidden` is about **where the request came from**; a bad key returns 401
+> `authentication_error`. Don't rotate credentials chasing this.
+>
+> `hkg1` is tempting — it is closer to Manila *and* colocates with the Hong Kong Atlas
+> cluster, which is why it was pinned there originally (commit `ecda895`, with measured
+> RTT numbers). That reasoning is still true and still superseded: the move costs tens of
+> ms per DB round-trip and buys back 100% of AI drafting. If you need that latency back,
+> move the **Atlas cluster** to Singapore — never the functions to Hong Kong.
+>
+> Verify on the deployed site with `vercel logs <deployment-url> --expand`; without
+> `--expand` the 403 body is truncated away.
+
+---
+
 ## Documentation
 
 - **`docs/gmail-setup.md`** — Create a Google Cloud project, enable the Gmail API, configure OAuth, and obtain the refresh token

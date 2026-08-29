@@ -7,7 +7,11 @@ End-to-end checklist for going live. Work through the steps in order — each se
 ## 1. MongoDB Atlas
 
 1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and create a free account (or log in).
-2. Create a new **free (M0) cluster**. Region does not matter for a single-user tool; Singapore is a reasonable choice.
+2. Create a new **free (M0) cluster**. Pick **Singapore** — it matches the `sin1` function
+   region pinned in `vercel.json` (see the region warning in §2), so compute and data stay
+   colocated. The existing cluster predates that pin and is in **Hong Kong**, which costs
+   tens of ms per DB round-trip; that is accepted deliberately because functions cannot run
+   in `hkg1` without breaking every Anthropic call.
 3. Under **Security → Database Access**, create a database user with a strong, unique password. Assign the built-in role **readWrite** scoped to your app database only (select "Restrict access to specific databases" and enter the same `<dbname>` you use in the connection string, e.g. `shikkstracker`). Do **not** use the "Read and write to any database" cluster-wide role.
 4. Under **Security → Network Access**, click **Add IP Address → Allow Access from Anywhere** (adds `0.0.0.0/0`). Vercel's outbound IPs are not fixed, so this is required on the free tier. Compensate by using a long, unique database password (see step 3).
 5. Under **Deployment → Database**, click **Connect → Drivers** and copy the connection string. Replace `<password>` with your database user's password. The string looks like:
@@ -23,6 +27,27 @@ End-to-end checklist for going live. Work through the steps in order — each se
 1. Push the repo to GitHub (or GitLab / Bitbucket).
 2. Go to [vercel.com](https://vercel.com), click **Add New → Project**, and import the repo.
 3. Framework preset is detected as **Next.js** — leave all build settings at default.
+
+   > ### ⚠️ Deployment region is `sin1` and must stay there
+   >
+   > `vercel.json` pins `"regions": ["sin1"]` (Singapore). **This is an AI-availability
+   > constraint, not a latency preference.**
+   >
+   > **Anthropic refuses API requests originating from Hong Kong.** Deployed to `hkg1`,
+   > every `src/lib/draft.ts` call fails with
+   > `403 {"error":{"type":"forbidden","message":"Request not allowed"}}`, killing draft
+   > generation, draft regeneration and AI template generation. It works locally because a
+   > laptop in Manila reaches the API fine, so this only ever shows up in production.
+   >
+   > - **A 403 `forbidden` means *where* the request came from. A bad key returns 401
+   >   `authentication_error`.** Don't rotate the key chasing this.
+   > - **Do not move the region back to `hkg1` for latency.** That was a real, measured
+   >   decision (commit `ecda895`) — the Atlas cluster is in Hong Kong, so `hkg1` did
+   >   colocate compute with data. It is superseded anyway: it saves tens of ms per DB
+   >   round-trip and breaks 100% of AI drafting. To reclaim that latency, move the
+   >   **Atlas cluster** to Singapore instead — never the functions to Hong Kong.
+   > - Verify on the **deployed** site, and use `vercel logs <deployment-url> --expand`;
+   >   without `--expand` the message is truncated and the 403 body is invisible.
 4. Before clicking **Deploy**, open **Environment Variables** and add every required variable:
 
    | Variable | Value |
