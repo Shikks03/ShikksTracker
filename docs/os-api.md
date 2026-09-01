@@ -56,11 +56,28 @@ dashboard shows can never disagree.
 `hot` uses the server-side `HOT_LEAD_THRESHOLD` (default 5), the same variable
 the `?hot=true` contact filter reads.
 
-`messenger` is **always zeroed in P1.** The Messenger models arrive in P2
-(Feature A of the spec); the key ships now so the response shape does not change
-when they do. Until P2 lands, read `lastEventAt: null` as "no webhook yet", not
-as "the webhook is dead" — the watchdog interpretation only becomes valid once
-P2 is deployed.
+`messenger` carries live webhook data as of P2 (2026-08-30). Before that it was
+hardcoded to zeros and `lastEventAt: null` meant "no webhook exists yet".
+**That reading is now obsolete — do not apply it.**
+
+- `lastEventAt` — `createdAt` of the newest `MessengerMessage`, in or out. This
+  is the webhook's liveness signal: it advances whenever Meta delivers anything.
+  **`null` now means no Messenger event has EVER been received.** On a live
+  deployment that is either a brand-new install or a broken subscription, and
+  after the first real message arrives it should never return to `null`.
+- A `lastEventAt` that stops advancing is the expected failure mode, not a rare
+  one: the dev-mode page access token expires (~60 days) and Meta disables
+  subscriptions that repeatedly fail. Staleness is a legitimate alarm condition
+  — but calibrate the threshold against message VOLUME, not uptime. This page
+  receives a handful of messages a week, so a quiet day is silence, not death.
+  Days, not hours.
+- `unlinkedCount` — conversations awaiting a human link decision. These have
+  messages stored but no `Contact`, so no reply effects have been applied and
+  the leads are invisible to `/api/os/attention`. A number that climbs and stays
+  up means triage has stalled.
+- `unansweredCount` — conversations whose newest inbound is newer than their
+  newest outbound (or which have never been answered), excluding `ignored`.
+  This is the Messenger equivalent of `repliedUnanswered`.
 
 ### GET /api/os/attention
 

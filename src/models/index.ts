@@ -24,3 +24,9 @@ export type { ISettings } from "./Settings";
 
 export { default as Variant } from "./Variant";
 export type { IVariant } from "./Variant";
+
+export { default as MessengerConversation } from "./MessengerConversation";
+export type { IMessengerConversation, MessengerLinkStatus } from "./MessengerConversation";
+
+export { default as MessengerMessage } from "./MessengerMessage";
+export type { IMessengerMessage, MessengerDirection } from "./MessengerMessage";

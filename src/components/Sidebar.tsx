@@ -7,18 +7,24 @@ import { LogOut } from "lucide-react";
 import { useNextSendCountdown } from "./useNextSendCountdown";
 import { useSendingEnabled } from "./useSendingEnabled";
 
-const NAV_ITEMS = [
-  { index: "01", label: "Dashboard",    href: "/",            showBadge: false },
-  { index: "02", label: "Review Queue", href: "/review",      showBadge: true  },
-  { index: "03", label: "Outreach",     href: "/outreach",    showBadge: false },
-  { index: "04", label: "Campaigns",    href: "/campaigns",   showBadge: false },
-  { index: "05", label: "Import",       href: "/import",      showBadge: false },
+const NAV_ITEMS: Array<{
+  index: string;
+  label: string;
+  href: string;
+  badge: "drafts" | "messenger" | null;
+}> = [
+  { index: "01", label: "Dashboard",    href: "/",            badge: null        },
+  { index: "02", label: "Review Queue", href: "/review",      badge: "drafts"    },
+  { index: "03", label: "Messenger",    href: "/messenger",   badge: "messenger" },
+  { index: "04", label: "Outreach",     href: "/outreach",    badge: null        },
+  { index: "05", label: "Campaigns",    href: "/campaigns",   badge: null        },
+  { index: "06", label: "Import",       href: "/import",      badge: null        },
   // "Blocked" is the user-facing name for the suppression list; the route,
   // API and Suppression model keep the domain term.
-  { index: "06", label: "Blocked",      href: "/suppressions",showBadge: false },
-  { index: "07", label: "Compose",      href: "/compose",     showBadge: false },
-  { index: "08", label: "Templates",    href: "/templates",   showBadge: false },
-  { index: "09", label: "Settings",     href: "/settings",    showBadge: false },
+  { index: "07", label: "Blocked",      href: "/suppressions",badge: null        },
+  { index: "08", label: "Compose",      href: "/compose",     badge: null        },
+  { index: "09", label: "Templates",    href: "/templates",   badge: null        },
+  { index: "10", label: "Settings",     href: "/settings",    badge: null        },
 ];
 
 /* ── Typography helpers (inline so no "use client" needed in ui.tsx) ── */
@@ -35,10 +41,13 @@ export default function Sidebar() {
   const showCountdown = sendingEnabled === true;
   const countdown = useNextSendCountdown(showCountdown);
   const [draftCount, setDraftCount] = useState<number>(0);
+  const [messengerCount, setMessengerCount] = useState<number>(0);
 
-  // Fetch pending draft count on mount and whenever the route changes.
+  // Fetch both badge counts on mount and whenever the route changes — one
+  // effect, two fetches, same pattern for each.
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       try {
         // channel=email: the badge sits on "Review Queue", and /review lists
@@ -59,9 +68,31 @@ export default function Sidebar() {
         // silently swallow — badge stays hidden
       }
     }
+
+    async function loadMessenger() {
+      try {
+        // count=true -> { count: <unansweredCount> }, mirroring the draft
+        // badge query above (see GET /api/messenger/conversations).
+        const res = await fetch("/api/messenger/conversations?count=true");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { count?: number };
+        if (!cancelled && typeof data.count === "number") {
+          setMessengerCount(data.count);
+        }
+      } catch {
+        // silently swallow — badge stays hidden
+      }
+    }
+
     load();
+    loadMessenger();
     return () => { cancelled = true; };
   }, [pathname]);
+
+  const badgeCounts: Record<"drafts" | "messenger", number> = {
+    drafts: draftCount,
+    messenger: messengerCount,
+  };
 
   async function handleLogout() {
     try {
@@ -125,9 +156,10 @@ export default function Sidebar() {
 
       {/* ── Navigation ───────────────────────────────── */}
       <nav style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {NAV_ITEMS.map(({ index, label, href, showBadge }) => {
+        {NAV_ITEMS.map(({ index, label, href, badge }) => {
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
+          const count = badge ? badgeCounts[badge] : 0;
 
           return (
             <Link
@@ -174,8 +206,8 @@ export default function Sidebar() {
                 {label}
               </span>
 
-              {/* Amber draft badge — only on Review Queue, hidden when 0 */}
-              {showBadge && draftCount > 0 && (
+              {/* Amber badge — Review Queue (drafts) or Messenger (unanswered), hidden when 0 */}
+              {badge && count > 0 && (
                 <span
                   style={{
                     backgroundColor: "#C68A1E",
@@ -189,7 +221,7 @@ export default function Sidebar() {
                     flexShrink: 0,
                   }}
                 >
-                  {draftCount}
+                  {count}
                 </span>
               )}
             </Link>

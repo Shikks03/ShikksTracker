@@ -11,6 +11,8 @@
 import { describe, it, expect } from "vitest";
 import {
   NON_EMAIL_CHANNEL_QUERY,
+  NON_EMAIL_CHANNELS,
+  OUTREACH_BOARD_CHANNELS,
   isNonEmailChannel,
   checkMarkSentAllowed,
   VALID_OUTREACH_LOG_STATUSES,
@@ -352,4 +354,26 @@ describe("isSubjectRequiredForChannels", () => {
   it("does not require a subject for an empty channel list", () => {
     expect(isSubjectRequiredForChannels([])).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// OUTREACH_BOARD_CHANNELS — the P2 lane split (2026-08-30). Facebook moved to
+// /messenger; /outreach now shows only instagram + phone. These two tests pin
+// the trap called out in the Task 12 plan: OUTREACH_BOARD_CHANNELS is a
+// DISPLAY-only subset and must never be confused with (or substituted for)
+// NON_EMAIL_CHANNELS, which still gates checkMarkSentAllowed and the inverse
+// of Gmail auto-send in sequence.ts.
+// ---------------------------------------------------------------------------
+
+it("keeps facebook in NON_EMAIL_CHANNELS even though /outreach no longer shows it", () => {
+  // Guards the trap in Task 12: narrowing this constant to match the board
+  // would 400 every facebook Mark sent in the /messenger draft lane.
+  expect(NON_EMAIL_CHANNELS).toContain("facebook");
+  expect(OUTREACH_BOARD_CHANNELS).not.toContain("facebook");
+});
+
+it("still permits mark-sent for a facebook log", () => {
+  expect(
+    checkMarkSentAllowed({ channel: "facebook", status: "approved", contactCurrentStage: 0, logStage: 1 })
+  ).toEqual({ ok: true, mode: "claim" });
 });

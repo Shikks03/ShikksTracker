@@ -10,6 +10,8 @@ import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import Campaign from "@/models/Campaign";
 import CronRun from "@/models/CronRun";
+import MessengerConversation from "@/models/MessengerConversation";
+import MessengerMessage from "@/models/MessengerMessage";
 import { envInt } from "@/lib/env";
 
 // Mirrors src/app/api/contacts/route.ts, which reads the same variable for its
@@ -46,22 +48,38 @@ export interface OsSummary {
 /**
  * Builds the dashboard-grade snapshot.
  *
- * `messenger` is present and zeroed on purpose. The Messenger models arrive in
- * P2 (Feature A); shipping the key now means RikuOS's watchdog can read the
- * same shape before and after P2 lands, so P2 becomes a data change rather than
- * a contract change. Do NOT drop this key "until it has data".
+ * `messenger` carries live webhook data as of P2 (2026-08-30). Before that it
+ * was hardcoded to zeros/null so the response shape wouldn't change once the
+ * Messenger models landed — P2 is a data change, not a contract change. See
+ * the `messenger` paragraph in docs/os-api.md for what each field now means
+ * (in particular: `lastEventAt: null` no longer means "no webhook yet").
  */
 export async function buildOsSummary(campaignLimit: number): Promise<OsSummary> {
-  const [total, hot, pipelineRows, drafts, approved, lastRun] = await Promise.all([
-    Contact.countDocuments({}),
-    Contact.countDocuments({ engagementScore: { $gte: HOT_LEAD_THRESHOLD } }),
-    Contact.aggregate<{ _id: string; count: number }>([
-      { $group: { _id: "$pipelineStage", count: { $sum: 1 } } },
-    ]),
-    EmailLog.countDocuments({ status: "draft" }),
-    EmailLog.countDocuments({ status: "approved" }),
-    CronRun.findOne({}).sort({ startedAt: -1 }).select({ startedAt: 1, errorCount: 1 }).lean(),
-  ]);
+  const [total, hot, pipelineRows, drafts, approved, lastRun, lastMessage, unlinkedCount, unansweredCount] =
+    await Promise.all([
+      Contact.countDocuments({}),
+      Contact.countDocuments({ engagementScore: { $gte: HOT_LEAD_THRESHOLD } }),
+      Contact.aggregate<{ _id: string; count: number }>([
+        { $group: { _id: "$pipelineStage", count: { $sum: 1 } } },
+      ]),
+      EmailLog.countDocuments({ status: "draft" }),
+      EmailLog.countDocuments({ status: "approved" }),
+      CronRun.findOne({}).sort({ startedAt: -1 }).select({ startedAt: 1, errorCount: 1 }).lean(),
+      MessengerMessage.findOne({}).sort({ createdAt: -1 }).select({ createdAt: 1 }).lean(),
+      MessengerConversation.countDocuments({ linkStatus: "unlinked" }),
+      // "Unanswered" = their last message is newer than ours, or we never
+      // replied at all. `ignored` conversations are excluded: the user marked
+      // them not-a-lead, and counting them would make the badge permanently
+      // non-zero and therefore ignorable.
+      MessengerConversation.countDocuments({
+        linkStatus: { $ne: "ignored" },
+        lastInboundAt: { $ne: null },
+        $or: [
+          { lastOutboundAt: null },
+          { $expr: { $gt: ["$lastInboundAt", "$lastOutboundAt"] } },
+        ],
+      }),
+    ]);
 
   const byPipelineStage: Record<string, number> = Object.fromEntries(
     PIPELINE_STAGES.map((s) => [s, 0])
@@ -131,7 +149,12 @@ export async function buildOsSummary(campaignLimit: number): Promise<OsSummary> 
       lastRunAt: lastRun?.startedAt ? new Date(lastRun.startedAt).toISOString() : null,
       lastRunErrors: lastRun?.errorCount ?? 0,
     },
-    // Filled in by P2 (Feature A). See the docblock above.
-    messenger: { lastEventAt: null, unlinkedCount: 0, unansweredCount: 0 },
+    messenger: {
+      lastEventAt: lastMessage?.createdAt
+        ? new Date(lastMessage.createdAt).toISOString()
+        : null,
+      unlinkedCount,
+      unansweredCount,
+    },
   };
 }
