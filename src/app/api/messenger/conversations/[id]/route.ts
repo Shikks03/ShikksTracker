@@ -9,6 +9,7 @@ import MessengerMessage from "@/models/MessengerMessage";
 import Contact from "@/models/Contact";
 import EmailLog from "@/models/EmailLog";
 import { applyReplyEffects } from "@/lib/replyEffects";
+import { pickReplyAnchor } from "@/lib/messenger/linking";
 
 export const dynamic = "force-dynamic";
 
@@ -128,12 +129,16 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
  * Body: { action: "link", contactId } | { action: "ignore" } | { action: "unlink" }
  *
  * "link" is the retroactive-effects path (spec §A.4 step 3): reply effects
- * are applied for the EARLIEST inbound message since our last outbound —
- * that is the message that actually constitutes "they replied". Linking a
+ * are applied for the inbound message that constitutes "they replied", chosen
+ * by pickReplyAnchor (src/lib/messenger/linking.ts) — the earliest inbound
+ * since our last outbound, falling back to the most recent inbound when every
+ * one of them predates it. That fallback is not a nicety: a Page auto-greeting
+ * is echoed back within seconds of a first inbound message, so without it a
+ * linked prospect kept `not_started` with no engagement bump. Linking a
  * conversation that already had ten stored inbound messages, or linking one
  * twice, still bumps engagement exactly once — applyReplyEffects
  * (src/lib/replyEffects.ts) is idempotent once its anchor log is marked
- * replied.
+ * replied, or on the contact's own status when no sent log exists.
  *
  * Linking a PSID to a Contact another conversation already holds is
  * rejected with 409: two PSIDs mapped to one contact would double every
@@ -198,16 +203,25 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       conversation.contactId = new Types.ObjectId(validContactId);
       await conversation.save();
 
-      // The earliest inbound message since our last outbound is the one that
-      // actually constitutes "they replied" — not the newest, and not every
-      // stored inbound message (which would look like several replies).
-      const anchorInbound = await MessengerMessage.findOne({
+      // Which stored inbound message counts as "they replied" — see
+      // pickReplyAnchor for the rule and, more importantly, for why it needs a
+      // fallback: a Page auto-greeting echoes back within seconds of a first
+      // inbound message, leaving every inbound older than lastOutboundAt, and
+      // the old "since last outbound" query then found nothing and applied no
+      // effects at all.
+      //
+      // Load inbound ascending and decide in a pure function rather than
+      // encoding the rule in a query. Bounded by the same cap as the thread
+      // view; a triage conversation is nowhere near it.
+      const inboundAsc = await MessengerMessage.find({
         conversationId: conversation._id,
         direction: "in",
-        ...(conversation.lastOutboundAt ? { sentAt: { $gt: conversation.lastOutboundAt } } : {}),
       })
         .sort({ sentAt: 1 })
+        .limit(MAX_THREAD_MESSAGES)
         .lean();
+
+      const anchorInbound = pickReplyAnchor(inboundAsc, conversation.lastOutboundAt);
 
       let effectsApplied = false;
       if (anchorInbound) {

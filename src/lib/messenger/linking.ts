@@ -61,3 +61,65 @@ export function rankLinkSuggestions(
 function normalizedIsEmpty(s: string): boolean {
   return s.trim().length === 0;
 }
+
+// ---------------------------------------------------------------------------
+// Reply anchor selection (the retroactive-effects path)
+// ---------------------------------------------------------------------------
+
+/** Just enough of a MessengerMessage to choose an anchor. */
+export interface AnchorCandidate {
+  sentAt: Date;
+  text: string;
+}
+
+/**
+ * Which stored inbound message counts as "they replied", when a conversation
+ * is linked to a Contact after the fact.
+ *
+ * PRIMARY RULE, unchanged: the EARLIEST inbound message since our last
+ * outbound. In a running conversation that is the one that constitutes a
+ * reply — anything older was already answered, and taking the newest would
+ * misdate the reply.
+ *
+ * THE FALLBACK, and why it has to exist. The primary rule silently produced
+ * NO anchor for the ordinary case, so linking a real prospect applied no
+ * reply effects at all: they stayed `not_started` with no engagement bump and
+ * their queued follow-ups intact. Two ways a conversation arrives with every
+ * inbound message older than `lastOutboundAt`:
+ *
+ *   1. The Page has an automated greeting / instant reply configured. It fires
+ *      within SECONDS of a first-ever inbound message and is echoed back to us
+ *      as an outbound. `lastOutboundAt` is therefore newer than the prospect's
+ *      message before any human has seen it — this is the DEFAULT state of a
+ *      Page with a greeting, not an edge case.
+ *   2. The operator answered from the Page inbox on their phone before getting
+ *      round to linking in the dashboard, which is the natural order of events.
+ *
+ * In both, the prospect plainly did message us, so falling back to the most
+ * recent inbound message is right: it is the freshest thing they actually said,
+ * and it is what a human reading the thread would point at.
+ *
+ * Replaying this cannot double-count. `applyReplyEffects` is idempotent on the
+ * anchor log's `replied` flag, or on the contact's own status when no sent log
+ * exists, so re-linking applies effects at most once.
+ *
+ * Pure so it is testable — the route does the querying.
+ *
+ * @param inboundAsc inbound messages for the conversation, ascending by sentAt
+ * @param lastOutboundAt the conversation's last outbound timestamp, if any
+ */
+export function pickReplyAnchor<T extends AnchorCandidate>(
+  inboundAsc: readonly T[],
+  lastOutboundAt: Date | null | undefined
+): T | null {
+  if (inboundAsc.length === 0) return null;
+
+  if (lastOutboundAt) {
+    const cutoff = new Date(lastOutboundAt).getTime();
+    const since = inboundAsc.find((m) => new Date(m.sentAt).getTime() > cutoff);
+    if (since) return since;
+  }
+
+  // No outbound yet, or every inbound predates it (see the two cases above).
+  return inboundAsc[inboundAsc.length - 1];
+}

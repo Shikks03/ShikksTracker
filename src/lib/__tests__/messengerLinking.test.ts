@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizedTokens, tokenSimilarity } from "@/lib/messenger/similarity";
-import { rankLinkSuggestions } from "@/lib/messenger/linking";
+import { rankLinkSuggestions, pickReplyAnchor } from "@/lib/messenger/linking";
 
 describe("tokenSimilarity", () => {
   it("is 1 for identical strings ignoring case and punctuation", () => {
@@ -82,5 +82,76 @@ describe("rankLinkSuggestions", () => {
       { _id: "a1", businessName: "Luna", contactName: null, hasSentFacebookLog: false, hasReplied: false },
     ];
     expect(rankLinkSuggestions("Luna", tied).map((s) => s.contactId)).toEqual(["a1", "b2"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("pickReplyAnchor", () => {
+  const at = (iso: string, text = "msg") => ({ sentAt: new Date(iso), text });
+
+  it("returns null when there are no inbound messages", () => {
+    expect(pickReplyAnchor([], new Date("2026-09-04T01:00:00Z"))).toBeNull();
+  });
+
+  it("picks the earliest inbound since the last outbound", () => {
+    const msgs = [
+      at("2026-09-04T01:00:00Z", "old"),
+      at("2026-09-04T03:00:00Z", "the reply"),
+      at("2026-09-04T04:00:00Z", "and more"),
+    ];
+    const anchor = pickReplyAnchor(msgs, new Date("2026-09-04T02:00:00Z"));
+    expect(anchor?.text).toBe("the reply");
+  });
+
+  it("picks the earliest inbound when there is no outbound at all", () => {
+    const msgs = [at("2026-09-04T01:00:00Z", "first"), at("2026-09-04T02:00:00Z", "second")];
+    // No cutoff, so the fallback returns the most recent — the freshest thing
+    // they said, which is what a human reading the thread would point at.
+    expect(pickReplyAnchor(msgs, null)?.text).toBe("second");
+  });
+
+  it("falls back to the most recent inbound when a Page auto-greeting outran it", () => {
+    // THE REGRESSION. Prospect messages at 01:50:52; the Page's automated
+    // instant reply is echoed back at 01:50:55. Every inbound is now older
+    // than lastOutboundAt, and the old query returned nothing — so linking
+    // applied no reply effects and the contact stayed not_started.
+    const msgs = [at("2026-09-04T01:50:52.312Z", "hello")];
+    const anchor = pickReplyAnchor(msgs, new Date("2026-09-04T01:50:55.446Z"));
+    expect(anchor?.text).toBe("hello");
+  });
+
+  it("falls back when the operator replied from the Page inbox before linking", () => {
+    const msgs = [
+      at("2026-09-04T01:00:00Z", "hi there"),
+      at("2026-09-04T01:30:00Z", "are you available?"),
+    ];
+    const anchor = pickReplyAnchor(msgs, new Date("2026-09-04T04:03:43Z"));
+    expect(anchor?.text).toBe("are you available?");
+  });
+
+  it("prefers a genuine post-outbound reply over the fallback", () => {
+    const msgs = [
+      at("2026-09-04T01:00:00Z", "hello"),
+      at("2026-09-04T05:00:00Z", "still interested"),
+    ];
+    const anchor = pickReplyAnchor(msgs, new Date("2026-09-04T04:00:00Z"));
+    expect(anchor?.text).toBe("still interested");
+  });
+
+  it("treats an inbound exactly at the outbound timestamp as not newer", () => {
+    // Strictly greater, matching the $gt the query used. An equal timestamp is
+    // our own echo racing the inbound, not a reply to it.
+    const msgs = [at("2026-09-04T02:00:00Z", "same instant")];
+    const anchor = pickReplyAnchor(msgs, new Date("2026-09-04T02:00:00Z"));
+    expect(anchor?.text).toBe("same instant"); // via the fallback, not the cutoff
+  });
+
+  it("accepts string timestamps from a .lean() read", () => {
+    const msgs = [
+      { sentAt: "2026-09-04T01:00:00Z" as unknown as Date, text: "old" },
+      { sentAt: "2026-09-04T03:00:00Z" as unknown as Date, text: "new" },
+    ];
+    expect(pickReplyAnchor(msgs, new Date("2026-09-04T02:00:00Z"))?.text).toBe("new");
   });
 });
