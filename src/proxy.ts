@@ -11,6 +11,8 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/session";
  *   /api/webhooks/*    — guarded by X-Hub-Signature-256 (Meta); see signature.ts
  *   /api/health        — exact match
  *   /login             — exact match (the login page itself)
+ *   /privacy, /terms, /data-deletion — public legal pages; Meta App Review
+ *                        requires them to load for a logged-out reviewer
  *   /api/auth/login    — exact match (the login POST handler)
  *   /_next/*           — Next.js internals (also excluded by matcher, belt+suspenders)
  *   /favicon.ico       — static asset
@@ -53,6 +55,14 @@ function isPublicPath(pathname: string): boolean {
   if (
     pathname === "/api/health" ||
     pathname === "/login" ||
+    // The only pages on this site written for someone who is not the operator:
+    // a business asking to be deleted, and a Meta App Reviewer checking that the
+    // Privacy Policy / Terms / data-deletion URLs actually resolve. A reviewer is
+    // logged out by definition, so redirecting these to /login fails the review.
+    // They are static prose with no data access, so being public costs nothing.
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
+    pathname === "/data-deletion" ||
     pathname === "/api/auth/login" ||
     // Google redirects the browser here cross-site, and the session cookie is
     // SameSite=Strict — so it is structurally impossible for this endpoint to
