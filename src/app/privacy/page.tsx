@@ -70,9 +70,11 @@ export default function PrivacyPage() {
         rented, or shared for anyone else&rsquo;s marketing.
       </P>
       <P>
-        The lawful basis relied on is legitimate interest in business-to-business communication,
-        consistent with the Philippine Data Privacy Act of 2012 (Republic Act No. 10173), together
-        with consent where a business chooses to reply or message the Page.
+        The lawful basis relied on is legitimate interest under Section 12(f) of the Data Privacy
+        Act of 2012 (Republic Act No. 10173): introducing a relevant commercial offer to businesses
+        at their published contact points, in a way any business can refuse once and not hear from
+        again. When a business writes back or messages the Page, that message is stored and
+        answered on the same basis.
       </P>
 
       <H2>Who else processes it</H2>
@@ -89,14 +91,16 @@ export default function PrivacyPage() {
       </UL>
       <P>
         Information may be stored on servers outside the Philippines, since these providers operate
-        internationally.
+        internationally. The operator remains responsible for it wherever it is stored.
       </P>
 
       <H2>How long it is kept</H2>
       <P>
         Contact records are kept while outreach to that business is ongoing or a conversation is
-        live, and are deleted on request. Message logs are kept as a record of what was sent. Ask
-        to be removed and they are deleted with the rest.
+        live, and are deleted on request. Message logs live exactly as long as the contact record
+        they belong to: they are the record of what was sent and when, which is what lets an
+        opt-out be honoured and any later question about a message be answered. Delete the contact
+        record and its message logs go with it.
       </P>
       <P>
         <strong>One exception, and it exists to protect you.</strong> If you opt out or ask to be
@@ -113,6 +117,7 @@ export default function PrivacyPage() {
         <LI>Have inaccurate information corrected</LI>
         <LI>Object to the processing, and be removed from further contact</LI>
         <LI>Ask for erasure or blocking of your information</LI>
+        <LI>Claim damages for a proven violation, and ask for a machine-readable copy of anything you yourself supplied</LI>
         <LI>Lodge a complaint with the National Privacy Commission (privacy.gov.ph)</LI>
       </UL>
       <P>
@@ -123,10 +128,11 @@ export default function PrivacyPage() {
 
       <H2>Opting out</H2>
       <P>
-        Every email sent carries a one-line opt-out note. Replying to any email and asking to be
-        removed is enough — no particular wording is required, and the request is honoured
-        immediately and permanently. You can also message the Facebook Page, or email the address
-        above.
+        Every email sent carries a one-line opt-out note. Replying to the email itself is the
+        fastest route: any reply, whatever its wording, halts the automated sequence before the
+        next send, and an opt-out is recorded permanently. You can also message the Facebook Page,
+        or email the address above. A request made there is applied as soon as it is read, and
+        just as permanently.
       </P>
 
       <H2>Security</H2>
@@ -135,7 +141,7 @@ export default function PrivacyPage() {
         encrypted in transit. Access credentials for the connected email, database and messaging
         accounts are stored as encrypted environment variables and are never exposed publicly.
         Attempts to log in are recorded with the IP address they came from, to limit password
-        guessing; those records are deleted after fifteen minutes.
+        guessing; this tool deletes its record of them after fifteen minutes.
       </P>
 
       <H2>Children</H2>

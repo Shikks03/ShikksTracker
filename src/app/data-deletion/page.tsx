@@ -34,6 +34,7 @@ export default function DataDeletionPage() {
         <LI>Your contact record is deleted, including business name, email address, phone number, social handles, website, and any notes held about your business</LI>
         <LI>Any unsent drafts addressed to you are deleted</LI>
         <LI>Records of messages already sent, and of any reply you sent, are deleted</LI>
+        <LI>The copies in the operator&rsquo;s own mailbox are deleted as well; the copy already in your inbox is beyond this tool&rsquo;s reach — that one is yours</LI>
         <LI>Any Facebook Page conversation with you, and its messages, are deleted</LI>
         <LI>No further contact is made, on any channel</LI>
       </UL>

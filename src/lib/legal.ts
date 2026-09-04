@@ -11,8 +11,13 @@
  * OPERATOR_NAME should be changed to match it — the two are compared.
  */
 
-/** Legal/trading name of whoever operates this tool. */
-export const OPERATOR_NAME = "Shikkari Ipil, trading as Riku";
+/** Legal name of whoever operates this tool. The trade name "Riku" is
+ *  deliberately omitted until it is DTI-registered (legal review 2026-09-04:
+ *  publishing "trading as <unregistered name>" is a written admission of an
+ *  RA 3883 violation, while the bare true name needs no registration). Once
+ *  registered, restore it as:
+ *  "Shikkari Ipil, trading as Riku (DTI Business Name Reg. No. ____)". */
+export const OPERATOR_NAME = "Shikkari Ipil";
 
 /** Monitored address for privacy requests. Must actually be read. */
 export const CONTACT_EMAIL = "riku.mnl26@gmail.com";

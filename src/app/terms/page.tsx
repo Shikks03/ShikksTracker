@@ -39,7 +39,7 @@ export default function TermsPage() {
       <UL>
         <LI>Contact businesses about a genuine commercial offer, identifying who is writing and why</LI>
         <LI>Include a clear opt-out in every message sent</LI>
-        <LI>Honour every opt-out request immediately and permanently, whatever words are used to make it</LI>
+        <LI>Honour every opt-out request permanently, whatever words are used to make it — a reply to any email halts the automated sequence before the next send, and a request on any other channel is applied as soon as it is read</LI>
         <LI>Respect the daily sending limits and platform rules of the email and messaging services it connects to</LI>
         <LI>Manage replies received, so that a person answers them</LI>
       </UL>
