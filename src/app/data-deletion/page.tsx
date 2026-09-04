@@ -20,7 +20,7 @@ export default function DataDeletionPage() {
       </P>
       <UL>
         <LI>Your business name</LI>
-        <LI>The email address, phone number, or Facebook Page name that was contacted</LI>
+        <LI>The email address or phone number that was contacted, or the Facebook name you messaged the Page from</LI>
       </UL>
       <P>
         That is the whole process. There is no form and no account to sign into. You can also

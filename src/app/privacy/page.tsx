@@ -38,7 +38,7 @@ export default function PrivacyPage() {
       <UL>
         <LI>The subject and full text of messages sent, and the date sent</LI>
         <LI>Whether an email was opened, and whether a link in it was clicked — measured with a small tracking image and redirect links</LI>
-        <LI>Replies received, and a short excerpt of the reply</LI>
+        <LI>Replies received, and the full text of the reply</LI>
         <LI>An internal engagement score derived from the above</LI>
       </UL>
 
@@ -95,7 +95,8 @@ export default function PrivacyPage() {
       <H2>How long it is kept</H2>
       <P>
         Contact records are kept while outreach to that business is ongoing or a conversation is
-        live, and are deleted on request. Message logs are kept as a record of what was sent.
+        live, and are deleted on request. Message logs are kept as a record of what was sent. Ask
+        to be removed and they are deleted with the rest.
       </P>
       <P>
         <strong>One exception, and it exists to protect you.</strong> If you opt out or ask to be
@@ -112,7 +113,7 @@ export default function PrivacyPage() {
         <LI>Have inaccurate information corrected</LI>
         <LI>Object to the processing, and be removed from further contact</LI>
         <LI>Ask for erasure or blocking of your information</LI>
-        <LI>Lodge a complaint with the National Privacy Commission</LI>
+        <LI>Lodge a complaint with the National Privacy Commission (privacy.gov.ph)</LI>
       </UL>
       <P>
         To exercise any of these, email <strong>{CONTACT_EMAIL}</strong>. Requests are answered
@@ -133,6 +134,8 @@ export default function PrivacyPage() {
         The dashboard is password-protected and reachable only by the operator. Traffic is
         encrypted in transit. Access credentials for the connected email, database and messaging
         accounts are stored as encrypted environment variables and are never exposed publicly.
+        Attempts to log in are recorded with the IP address they came from, to limit password
+        guessing; those records are deleted after fifteen minutes.
       </P>
 
       <H2>Children</H2>
