@@ -106,11 +106,24 @@ function fmtDateTime(d: string | null): string {
   });
 }
 
-/** As a Page admin, this opens the live Messenger thread for a PSID directly —
- *  the actual next action once a drafted reply is copied, and more useful
- *  here than a generic profile link since we may not even have one on file. */
-function messengerThreadUrl(psid: string): string {
-  return `https://www.facebook.com/messages/t/${encodeURIComponent(psid)}`;
+/**
+ * Where "open this conversation on Facebook" actually goes.
+ *
+ * It is the PAGE INBOX, not the individual thread, and that is not a
+ * compromise we can engineer around. This used to build
+ * `facebook.com/messages/t/<psid>` on the assumption that a Page admin could
+ * deep-link a thread by PSID. That is wrong and the link was broken in
+ * practice: a PSID is *page-scoped* — an identifier Meta mints for one
+ * (user, page) pair — and is neither a Facebook user id nor a thread id, so
+ * `/messages/t/` cannot resolve it. Meta exposes no per-thread URL keyed by
+ * PSID, so there is nothing to substitute; sending the operator to the inbox
+ * one click away from the right thread beats sending them to an error page.
+ *
+ * The thread is easy to find once there: it is the most recent inbound
+ * message, which is why the conversation list orders by lastInboundAt.
+ */
+function pageInboxUrl(): string {
+  return "https://business.facebook.com/latest/inbox";
 }
 
 /**
@@ -640,7 +653,7 @@ export default function MessengerPage() {
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                       <a
-                        href={messengerThreadUrl(thread.conversation.psid)}
+                        href={pageInboxUrl()}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
@@ -656,7 +669,7 @@ export default function MessengerPage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        Open Messenger →
+                        Open Page inbox →
                       </a>
                       {thread.contact && (
                         <Link
@@ -818,7 +831,7 @@ export default function MessengerPage() {
                             {copied ? "Copied" : "Copy"}
                           </Button>
                           <a
-                            href={messengerThreadUrl(thread.conversation.psid)}
+                            href={pageInboxUrl()}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
@@ -835,7 +848,7 @@ export default function MessengerPage() {
                               alignItems: "center",
                             }}
                           >
-                            Open →
+                            Open inbox →
                           </a>
                           <Button
                             variant="primary"
