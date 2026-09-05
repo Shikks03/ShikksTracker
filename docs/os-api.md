@@ -60,17 +60,42 @@ the `?hot=true` contact filter reads.
 hardcoded to zeros and `lastEventAt: null` meant "no webhook exists yet".
 **That reading is now obsolete — do not apply it.**
 
+**Equally important, as of 2026-09-05: none of these three fields is a signal of
+lead activity, and none ever will be.** The Meta app is permanently in
+Development mode (publishing was closed — see SESSION_NOTES 2026-09-05), so
+webhook events fire only for accounts with a role on the app. Every number here
+reflects Riku's own test conversations only. Consume them as wiring checks, not
+as business signals.
+
 - `lastEventAt` — `createdAt` of the newest `MessengerMessage`, in or out. This
   is the webhook's liveness signal: it advances whenever Meta delivers anything.
   **`null` now means no Messenger event has EVER been received.** On a live
   deployment that is either a brand-new install or a broken subscription, and
   after the first real message arrives it should never return to `null`.
-- A `lastEventAt` that stops advancing is the expected failure mode, not a rare
-  one: the dev-mode page access token expires (~60 days) and Meta disables
-  subscriptions that repeatedly fail. Staleness is a legitimate alarm condition
-  — but calibrate the threshold against message VOLUME, not uptime. This page
-  receives a handful of messages a week, so a quiet day is silence, not death.
-  Days, not hours.
+- **⛔ DO NOT ALARM ON STALENESS. Superseded 2026-09-05 — read this before
+  building anything on `lastEventAt`.** Riku decided finally not to publish the
+  Meta app, so it stays in **Development mode permanently**. Meta delivers
+  webhook events only for accounts holding a role on the app, which means the
+  only person who can ever move this field is Riku himself, messaging his own
+  Page. **There is no prospect traffic and there never will be.**
+
+  This bullet previously said staleness was "a legitimate alarm condition",
+  calibrated against volume, because "this page receives a handful of messages a
+  week". That premise is dead. `lastEventAt` now freezes at Riku's last
+  self-test and stays frozen, so any staleness threshold fires once and then
+  fires forever — a permanent daily false alarm, in exactly the kind of digest
+  whose value depends on being trusted. RikuOS's `evaluateOutreach`
+  (`src/lib/outreachHealth.ts`, `WEBHOOK_SILENT_DAYS = 10`) was built on the old
+  wording and is being corrected there.
+
+  What the field is still good for: a **wiring check**. `null` means no
+  Messenger event has ever been received, which on a live deployment still means
+  a broken subscription. A non-null value means the webhook path works. Neither
+  says anything about lead activity.
+
+  The original alarm existed to catch an expiring page token before a lead was
+  left ignored. Under permanent Development mode there are no leads on this
+  channel to ignore, so the alarm protects nothing.
 - `unlinkedCount` — conversations awaiting a human link decision. These have
   messages stored but no `Contact`, so no reply effects have been applied and
   the leads are invisible to `/api/os/attention`. A number that climbs and stays
