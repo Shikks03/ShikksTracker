@@ -42,12 +42,6 @@ export default function PrivacyPage() {
         <LI>An internal engagement score derived from the above</LI>
       </UL>
 
-      <P>For businesses that message the connected Facebook Page:</P>
-      <UL>
-        <LI>The Page-scoped ID Meta assigns to the sender, and the display name Meta returns for it</LI>
-        <LI>Message content and timestamps, including messages sent in reply from the Page</LI>
-      </UL>
-
       <P>
         No payment details, government identifiers, precise location, or any special category of
         personal information is collected. No cookies are set on anyone other than the operator,
@@ -58,7 +52,6 @@ export default function PrivacyPage() {
       <UL>
         <LI>Publicly available business listings and public business pages</LI>
         <LI>Manual entry or file import by the operator</LI>
-        <LI>Messages a business chooses to send to the connected Facebook Page</LI>
         <LI>A business&rsquo;s own reply to an email</LI>
       </UL>
 
@@ -73,8 +66,8 @@ export default function PrivacyPage() {
         The lawful basis relied on is legitimate interest under Section 12(f) of the Data Privacy
         Act of 2012 (Republic Act No. 10173): introducing a relevant commercial offer to businesses
         at their published contact points, in a way any business can refuse once and not hear from
-        again. When a business writes back or messages the Page, that message is stored and
-        answered on the same basis.
+        again. When a business writes back by email, that reply is stored and answered on the
+        same basis.
       </P>
 
       <H2>Who else processes it</H2>
@@ -86,7 +79,6 @@ export default function PrivacyPage() {
         <LI><strong>MongoDB Atlas</strong> — database hosting</LI>
         <LI><strong>Vercel</strong> — application hosting</LI>
         <LI><strong>Google (Gmail API)</strong> — sending and receiving email from the operator&rsquo;s own mailbox</LI>
-        <LI><strong>Meta</strong> — delivering and receiving Facebook Page messages</LI>
         <LI><strong>Anthropic</strong> — drafting message text. The business details listed above are sent to this service to compose a draft; the operator reviews drafts before anything is sent</LI>
       </UL>
       <P>

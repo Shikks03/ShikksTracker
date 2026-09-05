@@ -41,8 +41,6 @@ import mongoose from "mongoose";
 import Contact from "../src/models/Contact.ts";
 import EmailLog from "../src/models/EmailLog.ts";
 import Variant from "../src/models/Variant.ts";
-import MessengerConversation from "../src/models/MessengerConversation.ts";
-import MessengerMessage from "../src/models/MessengerMessage.ts";
 import type { Model } from "mongoose";
 
 /**
@@ -58,8 +56,6 @@ const MODELS: Array<{ label: string; model: Model<any> }> = [
   { label: "Contact", model: Contact },
   { label: "EmailLog", model: EmailLog },
   { label: "Variant", model: Variant },
-  { label: "MessengerConversation", model: MessengerConversation },
-  { label: "MessengerMessage", model: MessengerMessage },
 ];
 
 const APPLY = process.argv.includes("--apply");

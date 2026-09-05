@@ -43,8 +43,7 @@ explicitly.
   },
   "queue": { "drafts": 0, "approved": 0 },
   "campaigns": [ { "id": "", "name": "", "sent": 0, "opened": 0, "clicked": 0, "replied": 0 } ],
-  "engine": { "lastRunAt": null, "lastRunErrors": 0 },
-  "messenger": { "lastEventAt": null, "unlinkedCount": 0, "unansweredCount": 0 }
+  "engine": { "lastRunAt": null, "lastRunErrors": 0 }
 }
 ```
 
@@ -56,209 +55,47 @@ dashboard shows can never disagree.
 `hot` uses the server-side `HOT_LEAD_THRESHOLD` (default 5), the same variable
 the `?hot=true` contact filter reads.
 
-`messenger` carries live webhook data as of P2 (2026-08-30). Before that it was
-hardcoded to zeros and `lastEventAt: null` meant "no webhook exists yet".
-**That reading is now obsolete — do not apply it.**
+### RIP — the `messenger` block (2026-08-30 to 2026-09-05)
 
-### ⚰️ S15 — the Messenger lane is DELETED (2026-09-05)
+`GET /api/os/summary` used to return a fourth block:
 
-**The whole inbound Facebook Messenger lane was removed from this repo on
-2026-09-05** (decision S15, recorded in RikuOS `ARCHITECTURE.md` §7): the
-`/messenger` page, the webhook route, the ingest pipeline, the link/echo logic
-and their tests are gone. Nothing writes Messenger data any more.
-
-**This block is still returned, deliberately, and is the LAST thing to go.**
-RikuOS's `readStamp` (`src/lib/stApi.ts`) maps a MISSING `messenger` block to
-`null`, and `null` is the `webhook-never-fired` branch of its daily
-`evaluateOutreach` health check. So removing this block before RikuOS removes
-its consumer does not end the false alarm — it swaps "Messenger webhook silent
-for N days" for "ShikksTracker reports no Messenger event, ever". **Same daily
-noise, different sentence.** The trap is not that the alarm is wrong; it is that
-the alarm SURVIVES the fix meant to remove it.
-
-**Removal order, do not invert it:** RikuOS deletes its consumer
-(`evaluateOutreach`'s messenger branch, `WEBHOOK_SILENT_DAYS`,
-`SummaryMessenger`) and messages this repo. Only then does this block come out,
-along with `MessengerConversation` / `MessengerMessage` and their collections —
-the only pieces of the lane still standing. **If no such message has arrived,
-assume RikuOS is not done and keep the block.** Silence is not consent; holding
-costs nothing, dropping early is what produces the daily line.
-
-The values it now returns are frozen at the last event before deletion.
-
-Why this is spelled out instead of deleted quietly: `WEBHOOK_SILENT_DAYS = 10`
-exists because an earlier, confident line in THIS file said the page "receives a
-handful of messages a week" and RikuOS reasonably believed it. Neither file was
-wrong when written. A clean-looking file is precisely what lets the next session
-re-derive the assumption.
-
-**Equally important, as of 2026-09-05: none of these three fields is a signal of
-lead activity, and none ever will be.** The Meta app is permanently in
-Development mode (publishing was closed — see SESSION_NOTES 2026-09-05), so
-webhook events fire only for accounts with a role on the app. Every number here
-reflects Riku's own test conversations only. Consume them as wiring checks, not
-as business signals.
-
-- `lastEventAt` — `createdAt` of the newest `MessengerMessage`, in or out. This
-  is the webhook's liveness signal: it advances whenever Meta delivers anything.
-  **`null` now means no Messenger event has EVER been received.** On a live
-  deployment that is either a brand-new install or a broken subscription, and
-  after the first real message arrives it should never return to `null`.
-- **⛔ DO NOT ALARM ON STALENESS. Superseded 2026-09-05 — read this before
-  building anything on `lastEventAt`.** Riku decided finally not to publish the
-  Meta app, so it stays in **Development mode permanently**. Meta delivers
-  webhook events only for accounts holding a role on the app, which means the
-  only person who can ever move this field is Riku himself, messaging his own
-  Page. **There is no prospect traffic and there never will be.**
-
-  This bullet previously said staleness was "a legitimate alarm condition",
-  calibrated against volume, because "this page receives a handful of messages a
-  week". That premise is dead. `lastEventAt` now freezes at Riku's last
-  self-test and stays frozen, so any staleness threshold fires once and then
-  fires forever — a permanent daily false alarm, in exactly the kind of digest
-  whose value depends on being trusted. RikuOS's `evaluateOutreach`
-  (`src/lib/outreachHealth.ts`, `WEBHOOK_SILENT_DAYS = 10`) was built on the old
-  wording and is being corrected there.
-
-  What the field is still good for: a **wiring check**. `null` means no
-  Messenger event has ever been received, which on a live deployment still means
-  a broken subscription. A non-null value means the webhook path works. Neither
-  says anything about lead activity.
-
-  The original alarm existed to catch an expiring page token before a lead was
-  left ignored. Under permanent Development mode there are no leads on this
-  channel to ignore, so the alarm protects nothing.
-- `unlinkedCount` — conversations awaiting a human link decision. These have
-  messages stored but no `Contact`, so no reply effects have been applied and
-  the leads are invisible to `/api/os/attention`. A number that climbs and stays
-  up means triage has stalled.
-- `unansweredCount` — conversations whose newest inbound is newer than their
-  newest outbound (or which have never been answered), excluding `ignored`.
-  This is the Messenger equivalent of `repliedUnanswered`.
-
-### GET /api/os/attention
-
-```jsonc
-{
-  "repliedUnanswered": [ {
-    "contactId": "", "businessName": "", "contactName": null, "channel": "email",
-    "repliedAt": "2026-08-21T01:00:00.000Z", "replySnippet": null,
-    "lastOutboundBody": null, "keyPoints": "",
-    "offerSummary": null, "toneNotes": null,
-    "stage": 1, "replyToLogId": ""
-  } ],
-  "hotLeads": [ { "contactId": "", "businessName": "", "channel": "email", "engagementScore": 0, "pipelineStage": "", "currentStage": 0 } ],
-  "overdueActions": [ { "contactId": "", "businessName": "", "nextActionAt": "", "nextActionNote": null } ]
-}
+```json
+"messenger": { "lastEventAt": null, "unlinkedCount": 0, "unansweredCount": 0 }
 ```
 
-Every `repliedUnanswered` item carries enough context to draft a reply **without a
-second call** — that is why `keyPoints`, the campaign's `offerSummary`/`toneNotes`
-and the previous outbound body travel inline.
+**It is gone, along with the entire inbound Facebook Messenger lane** (decision
+S15; RikuOS `ARCHITECTURE.md` §7). Removed here in `cb3d2d7` and finished once
+RikuOS confirmed in `356197f`. **Do not add it back**, and do not treat its
+absence as a bug or an outage.
 
-A contact appears in `repliedUnanswered` when all of these hold:
+**Why the lane went, in one line:** the Meta app will never be published, so it
+stays in Development mode, where webhook events fire only for accounts holding a
+role on the app. No prospect message could ever arrive. Every counter here was
+structurally empty rather than merely zero.
 
-1. `status` is `replied`;
-2. it has no pending `draft`/`approved` log;
-3. it has at least one replied log — the newest one is the anchor, and its id is
-   returned as `replyToLogId`;
-4. that reply is older than `days`;
-5. nothing was sent after that reply.
+**Two lessons this block earned, worth more than the code was:**
 
-**Creating a draft for a contact removes it from this feed** (condition 2). That
-is the intended de-duplication: poll, draft, and it stops being proposed.
+1. **A confident sentence in a contract doc becomes a hard-coded constant
+   downstream.** This file used to say the Page "receives a handful of messages
+   a week" and that staleness was "a legitimate alarm condition". RikuOS
+   reasonably believed it and derived `WEBHOOK_SILENT_DAYS = 10` in its daily
+   health check. Neither file was wrong when written. That is exactly the
+   problem — and it is why this section is a gravestone rather than a clean
+   deletion.
 
-`replySnippet` is at most 81 characters. `lastOutboundBody` is truncated to 2000
-code points with a trailing `…` (code-point-safe, so emoji are never split).
+2. **Removing a dead signal can make things worse, not better.** RikuOS's
+   `readStamp` mapped a MISSING block to `null`, and `null` was its
+   "webhook never fired" alarm. Deleting this block before RikuOS deleted its
+   consumer would have swapped "Messenger webhook silent for N days" for
+   "ShikksTracker reports no Messenger event, ever" — **same daily noise,
+   different sentence**. The alarm would have survived the fix meant to remove
+   it. The removal was therefore ordered: consumer first, producer second, with
+   an explicit handshake between them.
 
-`hotLeads` excludes `replied`, `unsubscribed` and `bounced` contacts. A reply is
-worth +10 engagement, so without that exclusion every replied contact would also
-surface as a hot lead and RikuOS would propose two different actions for the same
-person.
-
-### GET /api/os/variant-stats
-
-```jsonc
-[ {
-  "key": "email-s1-painpoint", "label": "Email S1 — pain point first",
-  "channel": "email", "stage": 1,
-  "sends": 0, "uniqueContacts": 0, "replies": 0, "replyRate": 0,
-  "bySlice": {
-    "leadSource": { "cold_email": { "sends": 0, "replies": 0, "replyRate": 0 } },
-    "webPresenceTier": {}
-  }
-} ]
-```
-
-Counts `sent` logs only — a draft nobody approved says nothing about whether an
-approach earns replies.
-
-Variants with no sends are included, zeroed: a seeded-but-unused approach means
-the rotation has not reached it yet, and omitting it would look like it had been
-deleted. Conversely, a `variantKey` whose Variant was later deleted still appears
-with `label`/`channel`/`stage` null — dropping those sends would overstate the
-reply rate of everything that remains.
-
-`replyRate` is a fraction (not a percentage) rounded to 4 decimal places. Missing
-slice values bucket as `"unknown"`. Results are sorted by `sends` descending.
-
-`uniqueContacts` is additive beyond the spec's listed fields; a consumer reading
-only the spec fields is unaffected.
-
-### POST /api/os/drafts
-
-Request body:
-
-```jsonc
-{
-  "contactId": "",          // required, ObjectId
-  "channel": "email",       // required: email | facebook | instagram | phone
-  "body": "…",              // required, 1–50000 chars
-  "subject": "…",           // optional; derived as "Re: …" from the anchor if omitted
-  "replyToLogId": "",       // optional, ObjectId of a SENT log for this contact
-  "variantKey": ""          // optional, ≤100 chars
-}
-```
-
-Creates an `EmailLog` with `origin: "rikuos"` and `status: "approved"`. It is
-approved, not drafted, on purpose: the review gate exists so a human checks AI
-copy before it sends, and that already happened inside RikuOS. A second approval
-here would be theatre. (This mirrors `/compose`, which is likewise self-approved
-by authorship.)
-
-| Status | Meaning |
-|---|---|
-| 201 | Created. The log document is returned. |
-| 400 | Malformed body: bad/missing id, unknown channel, empty or oversized body, malformed `replyToLogId`. |
-| 401 / 503 | Auth — see above. |
-| 404 | Contact not found. |
-| 409 | A pending reply to the same `replyToLogId` already exists. Retry-safe: a repeated POST for the same queue item will not create a duplicate. |
-| 422 | Well-formed but not actionable: contact is unsubscribed/bounced/suppressed, has no email for an email draft, `replyToLogId` is not a sent log for that contact, or an email draft has no subject and nothing to derive one from. |
-
-A malformed `replyToLogId` is rejected rather than silently dropped. Dropping it
-would produce a reply that is neither threaded *nor* permitted to reach a replied
-contact — a silent half-failure that is much harder to diagnose from RikuOS than
-a 400.
-
-**What happens next.** Email drafts enter the ordinary approved queue, so the
-daily send cap, the 8am–6pm Asia/Manila send window and the send-time suppression
-re-check all still apply: a draft created at midnight sends in the morning, and
-sends are throttled to `SENDS_PER_RUN` (default 1) per hourly cron run. Facebook,
-Instagram and phone drafts appear in the manual outreach lane for copy-paste
-sending — this app never sends those over an API.
-
-`replyToLogId` does two things at send time:
-
-1. it is the **threading anchor** — `In-Reply-To`, `References` and the Gmail
-   `threadId` come from that log rather than from the stage-based lookup;
-2. its presence (or `origin: "rikuos"`) is what **permits the send to reach a
-   contact whose status is `replied`**. Without one of those markers the send
-   path reverts the log to `draft` and it is never delivered.
-
-Note that the stage stamped on the new log is inherited from the anchor, which is
-always at or below the contact's current stage. That is deliberate: it makes the
-post-send contact advance a no-op, so answering a reply can never re-enter that
-contact into the cold sequence.
+Still true and unaffected: `"facebook"` remains a valid `outreachChannel` and a
+valid `channel` on a log. Facebook drafts are AI-written and sent BY HAND from
+`/outreach`, exactly as instagram and phone are. S15 removed the INBOUND lane
+only; it licensed no outbound automation of any kind.
 
 ## Curl
 

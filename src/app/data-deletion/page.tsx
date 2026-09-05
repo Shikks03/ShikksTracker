@@ -35,7 +35,6 @@ export default function DataDeletionPage() {
         <LI>Any unsent drafts addressed to you are deleted</LI>
         <LI>Records of messages already sent, and of any reply you sent, are deleted</LI>
         <LI>The copies in the operator&rsquo;s own mailbox are deleted as well; the copy already in your inbox is beyond this tool&rsquo;s reach — that one is yours</LI>
-        <LI>Any Facebook Page conversation with you, and its messages, are deleted</LI>
         <LI>No further contact is made, on any channel</LI>
       </UL>
 
@@ -58,12 +57,16 @@ export default function DataDeletionPage() {
         need to opt out again.
       </P>
 
-      <H2>Facebook Page conversations</H2>
+      <H2>Messages you sent to the Facebook Page</H2>
       <P>
-        If you messaged the Facebook Page, the stored copy of that conversation is deleted as
-        described above. Deleting it here does not remove the conversation from Facebook&rsquo;s own
-        systems or from your Messenger inbox — to remove your data from Meta, use the privacy
-        controls in your Facebook account.
+        These are <strong>not stored by us at all</strong>. If you message the Facebook Page, that
+        conversation lives only in Facebook&rsquo;s own systems and in the Page inbox, which is read
+        there directly. There is nothing on our side to delete, and nothing about it is copied into
+        our records.
+      </P>
+      <P>
+        To remove such a conversation, use the privacy controls in your own Facebook account —
+        that is the only place it exists.
       </P>
 
       <H2>Questions</H2>
