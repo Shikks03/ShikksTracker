@@ -14,14 +14,15 @@ import { normalizeHandleUrl, telHref, type Channel } from "@/lib/channels";
 // defaults to both draft and approved logs — see resolveOutreachLogStatusFilter
 // in src/lib/outreachLogs.ts).
 //
-// P2 lane split (2026-08-30): this page now fetches only the instagram+phone
-// lane (`?channel=instagram,phone`, see OUTREACH_BOARD_CHANNELS in
-// src/lib/outreachLogs.ts). Facebook DMs moved to /messenger, which has the
-// conversation context a DM draft needs to be reviewable. This is a
-// DISPLAY-only narrowing — NON_EMAIL_CHANNELS still treats facebook as
-// non-email everywhere else (mark-sent, Gmail auto-send exclusion), so a
-// facebook log is still a perfectly valid non-email log, it just doesn't
-// render on this particular board any more.
+// This board shows facebook + instagram + phone (`?channel=...`, see
+// OUTREACH_BOARD_CHANNELS in src/lib/outreachLogs.ts).
+//
+// P2's lane split (2026-08-30) briefly moved facebook to /messenger, which had
+// the conversation context a DM draft was easier to review against. That page
+// is gone as of S15 (2026-09-05) along with the whole inbound Messenger lane,
+// so facebook is back here — and this is now the ONLY place a facebook draft
+// can be read and marked sent. Facebook outreach itself never stopped: drafts
+// are AI-written and sent BY HAND, exactly like instagram and phone.
 
 interface OutreachContact {
   _id: string;
@@ -99,7 +100,7 @@ export default function OutreachPage() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
-    // Narrowed to the instagram+phone lane — facebook lives in /messenger now.
+    // facebook + instagram + phone. See OUTREACH_BOARD_CHANNELS.
     // The no-param default on the API stays ALL non-email channels; this page
     // is the one caller that deliberately narrows it.
     const { data, error: err } = await apiFetch<OutreachLogItem[]>(
@@ -197,27 +198,6 @@ export default function OutreachPage() {
           </h1>
         </div>
 
-        {/* Facebook moved to /messenger (P2 lane split) — called out here so
-            the narrower board reads as intentional, not data loss. */}
-        <a
-          href="/messenger"
-          style={{
-            fontFamily: mono,
-            fontSize: 10.5,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: FAINT,
-            border: "1px solid #D8CFBB",
-            borderRadius: 6,
-            padding: "7px 12px",
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-            marginTop: 4,
-            flexShrink: 0,
-          }}
-        >
-          Facebook DMs now live in Messenger →
-        </a>
       </div>
 
       {/* Loading */}

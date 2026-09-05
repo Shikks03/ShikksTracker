@@ -28,19 +28,26 @@ export const NON_EMAIL_CHANNEL_QUERY: { channel: { $in: readonly NonEmailChannel
 };
 
 /**
- * Channels the /outreach board shows, as of P2's lane split (2026-08-30).
+ * Channels the /outreach board shows.
  *
- * Facebook moved to /messenger, which has the conversation context that makes a
- * DM draft reviewable. This is a DISPLAY subset and nothing more.
+ * Facebook is back here as of 2026-09-05 (decision S15), reversing P2's lane
+ * split. P2 moved it to /messenger because a conversation thread made a DM
+ * draft more reviewable; /messenger has since been deleted along with the whole
+ * inbound Messenger lane, so this board is once again the ONLY place a facebook
+ * draft can be read and marked sent. Leaving facebook out would have stranded
+ * every facebook draft with no lane at all — invisible, unsendable, and
+ * indistinguishable from a bug.
  *
- * It is deliberately NOT a narrowing of NON_EMAIL_CHANNELS. That constant
- * defines "not an email log" and gates checkMarkSentAllowed and (inversely)
- * Gmail auto-send. Facebook logs are still non-email logs, still hand-sent,
- * still marked sent through the same route — they are just rendered somewhere
- * else. Removing facebook from NON_EMAIL_CHANNELS would 400 every facebook
- * Mark sent in /messenger.
+ * Facebook outreach itself is unchanged and still happening: drafts are written
+ * by AI and sent BY HAND, exactly as instagram and phone are. Only the inbound
+ * half went away.
+ *
+ * Still a DISPLAY subset and nothing more, deliberately NOT a narrowing of
+ * NON_EMAIL_CHANNELS. That constant defines "not an email log" and gates
+ * checkMarkSentAllowed and (inversely) Gmail auto-send; removing facebook from
+ * it would 400 every facebook Mark sent.
  */
-export const OUTREACH_BOARD_CHANNELS = ["instagram", "phone"] as const;
+export const OUTREACH_BOARD_CHANNELS = ["facebook", "instagram", "phone"] as const;
 
 export const OUTREACH_BOARD_CHANNEL_QUERY: {
   channel: { $in: readonly NonEmailChannel[] };

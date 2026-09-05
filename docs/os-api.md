@@ -60,6 +60,38 @@ the `?hot=true` contact filter reads.
 hardcoded to zeros and `lastEventAt: null` meant "no webhook exists yet".
 **That reading is now obsolete — do not apply it.**
 
+### ⚰️ S15 — the Messenger lane is DELETED (2026-09-05)
+
+**The whole inbound Facebook Messenger lane was removed from this repo on
+2026-09-05** (decision S15, recorded in RikuOS `ARCHITECTURE.md` §7): the
+`/messenger` page, the webhook route, the ingest pipeline, the link/echo logic
+and their tests are gone. Nothing writes Messenger data any more.
+
+**This block is still returned, deliberately, and is the LAST thing to go.**
+RikuOS's `readStamp` (`src/lib/stApi.ts`) maps a MISSING `messenger` block to
+`null`, and `null` is the `webhook-never-fired` branch of its daily
+`evaluateOutreach` health check. So removing this block before RikuOS removes
+its consumer does not end the false alarm — it swaps "Messenger webhook silent
+for N days" for "ShikksTracker reports no Messenger event, ever". **Same daily
+noise, different sentence.** The trap is not that the alarm is wrong; it is that
+the alarm SURVIVES the fix meant to remove it.
+
+**Removal order, do not invert it:** RikuOS deletes its consumer
+(`evaluateOutreach`'s messenger branch, `WEBHOOK_SILENT_DAYS`,
+`SummaryMessenger`) and messages this repo. Only then does this block come out,
+along with `MessengerConversation` / `MessengerMessage` and their collections —
+the only pieces of the lane still standing. **If no such message has arrived,
+assume RikuOS is not done and keep the block.** Silence is not consent; holding
+costs nothing, dropping early is what produces the daily line.
+
+The values it now returns are frozen at the last event before deletion.
+
+Why this is spelled out instead of deleted quietly: `WEBHOOK_SILENT_DAYS = 10`
+exists because an earlier, confident line in THIS file said the page "receives a
+handful of messages a week" and RikuOS reasonably believed it. Neither file was
+wrong when written. A clean-looking file is precisely what lets the next session
+re-derive the assumption.
+
 **Equally important, as of 2026-09-05: none of these three fields is a signal of
 lead activity, and none ever will be.** The Meta app is permanently in
 Development mode (publishing was closed — see SESSION_NOTES 2026-09-05), so

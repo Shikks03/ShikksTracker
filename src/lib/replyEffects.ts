@@ -2,10 +2,17 @@
  * Shared reply effects — spec §A.5.
  *
  * WHY THIS EXISTS: this block used to live inline in checkReplies() (the email
- * path). P2 added a second channel that must apply exactly the same effects.
- * Two copies would drift the moment either changed, and the drift would be
- * silent — a contact still receiving follow-ups after replying looks like a
- * scheduling bug, not a missing state transition. One helper, both callers.
+ * path). P2 added a second caller — the Messenger lane — that had to apply
+ * exactly the same effects, and two copies would have drifted the moment either
+ * changed, silently: a contact still receiving follow-ups after replying looks
+ * like a scheduling bug, not a missing state transition.
+ *
+ * S15 (2026-09-05) deleted the Messenger lane, so **email is once again the only
+ * caller**. This stays extracted rather than being folded back inline: it is
+ * tested on its own, the `channel` parameter still legitimately takes facebook /
+ * instagram / phone (those lanes and their logs remain — only the inbound
+ * Messenger half went away), and inlining it would discard the idempotency
+ * reasoning below for no gain.
  *
  * Deliberately NOT covering opt-out. That path interleaves Suppression upsert
  * with log marking and alert queueing; src/lib/replies.ts documents why it

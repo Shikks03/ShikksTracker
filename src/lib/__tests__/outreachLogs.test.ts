@@ -357,19 +357,29 @@ describe("isSubjectRequiredForChannels", () => {
 });
 
 // ---------------------------------------------------------------------------
-// OUTREACH_BOARD_CHANNELS — the P2 lane split (2026-08-30). Facebook moved to
-// /messenger; /outreach now shows only instagram + phone. These two tests pin
-// the trap called out in the Task 12 plan: OUTREACH_BOARD_CHANNELS is a
-// DISPLAY-only subset and must never be confused with (or substituted for)
-// NON_EMAIL_CHANNELS, which still gates checkMarkSentAllowed and the inverse
-// of Gmail auto-send in sequence.ts.
+// OUTREACH_BOARD_CHANNELS — a DISPLAY-only subset that must never be confused
+// with (or substituted for) NON_EMAIL_CHANNELS, which gates checkMarkSentAllowed
+// and the inverse of Gmail auto-send in sequence.ts.
+//
+// History worth keeping: P2's lane split (2026-08-30) removed facebook from the
+// board because it had moved to /messenger. S15 (2026-09-05) deleted that page
+// and the whole inbound Messenger lane, so facebook came back here.
 // ---------------------------------------------------------------------------
 
-it("keeps facebook in NON_EMAIL_CHANNELS even though /outreach no longer shows it", () => {
-  // Guards the trap in Task 12: narrowing this constant to match the board
-  // would 400 every facebook Mark sent in the /messenger draft lane.
+it("shows facebook on the /outreach board — it has nowhere else to go", () => {
+  // THE REGRESSION THIS PINS: /messenger was deleted with S15, so this board is
+  // the only place a facebook draft can be read and marked sent. Dropping
+  // facebook from the board again would strand every facebook draft — invisible
+  // and unsendable, looking exactly like data loss rather than a config choice.
+  expect(OUTREACH_BOARD_CHANNELS).toContain("facebook");
+});
+
+it("keeps facebook in NON_EMAIL_CHANNELS, which is a separate concern", () => {
+  // The original Task 12 trap, still live: NON_EMAIL_CHANNELS defines "not an
+  // email log". Narrowing it to match whatever the board happens to display
+  // would 400 every facebook Mark sent, and would let Gmail auto-send consider
+  // a facebook log.
   expect(NON_EMAIL_CHANNELS).toContain("facebook");
-  expect(OUTREACH_BOARD_CHANNELS).not.toContain("facebook");
 });
 
 it("still permits mark-sent for a facebook log", () => {

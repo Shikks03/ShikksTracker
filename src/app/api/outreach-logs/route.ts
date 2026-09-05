@@ -34,9 +34,8 @@ export const dynamic = "force-dynamic";
  *   channel    optional — one or more of facebook/instagram/phone, comma-
  *              separated (e.g. "instagram,phone"), narrowing further than the
  *              baseline non-email filter. The no-param default stays ALL
- *              non-email channels — only the /outreach page (which now shows
- *              just the instagram+phone lane; facebook moved to /messenger)
- *              passes a narrowed value. Other callers rely on the default.
+ *              non-email channels; callers that want a subset pass one
+ *              explicitly. Other callers rely on the default.
  *   campaignId optional — scope to one campaign
  *
  * Never returns email-channel logs, including legacy logs written before the
